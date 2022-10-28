@@ -17,6 +17,42 @@ MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE'))
 DEFAULT_DIR_PERMISSION = os.environ.get('DEFAULT_DIR_PERMISSION')
 DEFAULT_FILE_PERMISSION = os.environ.get('DEFAULT_FILE_PERMISSION')
 
+@app.route('/ls', methods=['GET'])
+def ls() -> tuple[str, int]:
+    '''
+    This function lists the content of the given directory in the EDFS. Returns error if the directory doesn't exists.
+    Arguments:
+        path: Path of the directory in the EDFS
+    '''
+    path = request.args.get('path')
+    nodes = list(filter(None, path.split("/")))
+    _, pathMissing = is_valid_path(nodes)
+    if pathMissing == -1:
+        conn = pymysql.connect(
+            host=HOST_NAME,
+            user=DB_USERNAME, 
+            password = DB_PASSWORD,
+            database=DATABASE
+        )
+        cursor = conn.cursor()
+        query = "SELECT nn2.permission, " + \
+            "nn2.mtime, " + \
+            "nn2.name " + \
+            "FROM Parent_Child pc " + \
+            "JOIN Namenode nn ON pc.parent_inode = nn.inode_num " + \
+            "JOIN Namenode nn2 ON pc.child_inode = nn2.inode_num " + \
+            f"WHERE nn.name = '{path}'"
+        cursor.execute(query)
+        res = cursor.fetchall()
+        lsinfo = ""
+        for row in res:
+            lsinfo += '\t'.join(str(i) if i else '-' for i in row) + '\n'
+        if lsinfo:
+            lsinfo = f"Found {len(res)} items\n" + lsinfo
+        return lsinfo, 200
+    else:
+        return f"ls: {path}: No such file or directory", 400
+
 @app.route('/mkdir', methods = ['GET'])
 def mkdir() -> tuple[str, int]:
     '''
