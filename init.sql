@@ -2,13 +2,11 @@ DROP DATABASE IF EXISTS dsci551_project;
 CREATE DATABASE dsci551_project; 
 USE dsci551_project;
 
-/* Writing table */
-
 CREATE TABLE IF NOT EXISTS Namenode
 ( 
   inode_num BINARY(16),
   node_type CHAR(1) NOT NULL,
-  name VARCHAR(10) NOT NULL,
+  name VARCHAR(1000) NOT NULL,
   replication INT,
   mtime TIMESTAMP,
   atime TIMESTAMP,
@@ -21,7 +19,7 @@ INSERT INTO Namenode VALUES (UNHEX(REPLACE(UUID(),'-','')), 'd', '/', NULL, NULL
 
 CREATE TABLE IF NOT EXISTS Block_info_table
 (
-  blk_id BINARY(16),
+  blk_id VARCHAR(32),
   file_inode BINARY(16) NOT NULL,
   num_bytes INT NOT NULL,
   datanode_num smallint NOT NULL,
@@ -33,7 +31,7 @@ CREATE TABLE IF NOT EXISTS Block_info_table
 CREATE TABLE IF NOT EXISTS Datanode_1
 (
   data_block_id BINARY(16),
-  block_id BINARY(16) NOT NULL,
+  block_id VARCHAR(32) NOT NULL,
   content TEXT,
   PRIMARY KEY (data_block_id),
   FOREIGN KEY (block_id) REFERENCES Block_info_table(blk_id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -42,7 +40,7 @@ CREATE TABLE IF NOT EXISTS Datanode_1
 CREATE TABLE IF NOT EXISTS Datanode_2
 (
   data_block_id BINARY(16),
-  block_id BINARY(16) NOT NULL,
+  block_id VARCHAR(32) NOT NULL,
   content TEXT,
   PRIMARY KEY (data_block_id),
   FOREIGN KEY (block_id) REFERENCES Block_info_table(blk_id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -51,7 +49,7 @@ CREATE TABLE IF NOT EXISTS Datanode_2
 CREATE TABLE IF NOT EXISTS Datanode_3
 (
   data_block_id BINARY(16),
-  block_id BINARY(16) NOT NULL,
+  block_id VARCHAR(32) NOT NULL,
   content TEXT,
   PRIMARY KEY (data_block_id),
   FOREIGN KEY (block_id) REFERENCES Block_info_table(blk_id) ON UPDATE CASCADE ON DELETE CASCADE
