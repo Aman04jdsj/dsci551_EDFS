@@ -11,5 +11,6 @@ DATABASE = 'dsci551_project' -> Replace with your mysql database used in init.sq
 DEFAULT_DIR_PERMISSION = 755
 DEFAULT_FILE_PERMISSION = 644
 2. Run ```mysql -u root -p < init.sql``` from project directory or mysql -u root -p from project directory and then run ```source init.sql```
-3. To run the app execute the command ```flask --app fs_commands.py run```
-4. Open your browser and type 127.0.0.1:5000/command-name?args -> Replace with actual command and arguments
+3. Run pip3 install -r requirements.txt in the project directory to install dependencies
+4. To run the app execute the command ```flask --app fs_commands.py run```
+5. Open your browser and type 127.0.0.1:5000/command-name?args -> Replace with actual command and arguments
