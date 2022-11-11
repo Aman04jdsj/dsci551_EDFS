@@ -24,8 +24,53 @@ DEFAULT_DIR_PERMISSION = os.environ.get('DEFAULT_DIR_PERMISSION')
 DEFAULT_FILE_PERMISSION = os.environ.get('DEFAULT_FILE_PERMISSION')
 REPLICATION_FACTOR = int(os.environ.get('REPLICATION_FACTOR'))
 
+@app.route('/rm', methods=['GET'])
+def rm() -> tuple[str, int]:
+    '''
+    This function removes a file/directory from the EDFS. Returns error if directory is not empty or if path is invalid
+    Arguments:
+        path: Path of the file/directory in the EDFS
+        type: Type of the node being deleted
+    '''
+    path = request.args.get('path')
+    node_type = request.args.get('type')
+    _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
+    if missingChildDepth != -1:
+        return f"Cannot remove {path}: No such file or directory", 400
+    query = "DELETE nn, pc FROM Namenode nn" + \
+        " INNER JOIN Parent_Child pc ON nn.inode_num = pc.child_inode" + \
+        f" WHERE nn.name = '{path}'"
+    if node_type == 'file':
+        query = "DELETE nn, bi, d, pc FROM Namenode nn" + \
+            " INNER JOIN Block_info_table bi ON nn.inode_num = bi.file_inode" + \
+            " INNER JOIN Parent_Child pc ON nn.inode_num = pc.child_inode" + \
+            " INNER JOIN Datanode d ON bi.blk_id = d.blk_id" + \
+            f" WHERE nn.name = '{path}'"
+    conn = pymysql.connect(
+        host=HOST_NAME,
+        user=DB_USERNAME, 
+        password = DB_PASSWORD,
+        database=DATABASE
+    )
+    cursor = conn.cursor()
+    cursor.execute(query)
+    cursor.close()
+    conn.commit()
+    conn.close()
+    return f"Deleted {path}", 200
+
+
 @app.route('/put', methods=['GET'])
 def put() -> tuple[str, int]:
+    '''
+    This function puts the file specified into the EDFS. Returns error if the path is invalid or file is invalid
+    Arguments:
+        source: Path of the file in the local file system
+        destination: Path of the file in the EDFS
+        Optional:
+            partitions: Number of partitions of the file to be stored
+            hash: The column on which the file is to be hashed
+    '''
     args = request.args.to_dict()
     source = args['source']
     if not os.path.exists(source):
