@@ -78,6 +78,7 @@ def put() -> tuple[str, int]:
         ")"
     datanode_query = "INSERT INTO Datanode VALUES (" + \
         "UNHEX(REPLACE(UUID(), '-', ''))," + \
+        "'{}'," + \
         "{}," + \
         "\"{}\"," + \
         "\"{}\"" + \
@@ -100,7 +101,7 @@ def put() -> tuple[str, int]:
                 block_id = "".join(choices(string.ascii_letters, k=32))
                 datanode_num = randint(1, 3)
                 cursor.execute(blk_info_query.format(block_id, getsizeof(chunk_str), datanode_num))
-                cursor.execute(datanode_query.format(datanode_num, hash_val, chunk_str))
+                cursor.execute(datanode_query.format(block_id, datanode_num, hash_val, chunk_str))
     cursor.execute(parent_child_query.format(parent_inode_num, inode_num))
     cursor.close()
     conn.commit()

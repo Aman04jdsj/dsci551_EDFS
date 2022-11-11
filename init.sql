@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS Block_info_table
 CREATE TABLE IF NOT EXISTS Datanode
 (
   data_block_id BINARY(16),
+  blk_id VARCHAR(32) NOT NULL,
   datanode_num SMALLINT NOT NULL,
   hash_attribute VARCHAR(32),
   content TEXT,
@@ -42,6 +43,21 @@ SUBPARTITIONS 10 (
   PARTITION datanode2 VALUES LESS THAN (3),
   PARTITION datanode3 VALUES LESS THAN MAXVALUE
 );
+
+DROP TRIGGER IF EXISTS blk_id_chk;
+DELIMITER &&
+CREATE TRIGGER blk_id_chk
+  BEFORE INSERT ON Datanode
+  FOR EACH ROW
+  BEGIN
+    DECLARE count INT;
+    SELECT COUNT(*) FROM Block_info_table WHERE blk_id=new.blk_id INTO count;
+    IF count < 1 THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Foreign key constraint fails for Block_info_table!';
+    END IF;
+  END
+&&
+DELIMITER ;
 
 CREATE TABLE IF NOT EXISTS Parent_Child
 (
