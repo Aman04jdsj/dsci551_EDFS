@@ -1,10 +1,14 @@
 import os
 import string
 import pymysql
+import pandas as pd
+import numpy as np
 from random import choices, randint
 from dotenv import load_dotenv
 from flask import Flask, request
 from flask_cors import CORS
+from pathlib import Path
+from sys import getsizeof
 
 load_dotenv()
 
@@ -26,6 +30,9 @@ def put() -> tuple[str, int]:
     source = args['source']
     if not os.path.exists(source):
         return f"put: File does not exist: {source}", 400
+    csvFile = Path(source)
+    if not csvFile.is_file or not csvFile.suffix == ".csv":
+        return f"put: Invalid file: {source}", 400
     destination = args['destination']
     _, missingChildDepth = is_valid_path(list(filter(None, destination.split("/")))[:-1])
     if missingChildDepth != -1:
@@ -34,6 +41,9 @@ def put() -> tuple[str, int]:
     partitions = 1
     if 'partitions' in args:
         partitions = int(args['partitions'])
+    hash_attr = 0
+    if 'hash' in args:
+        hash_attr = args['hash']
     file_size = os.path.getsize(source)
     partition_size = min(file_size//partitions, MAX_PARTITION_SIZE)
     conn = pymysql.connect(
@@ -64,28 +74,34 @@ def put() -> tuple[str, int]:
         "'{}'," + \
         f"UNHEX('{inode_num}')," + \
         "{}," + \
-        "{}," + \
         "{}" + \
         ")"
-    datanode_query = "INSERT INTO Datanode_{} VALUES (" + \
+    datanode_query = "INSERT INTO Datanode VALUES (" + \
         "UNHEX(REPLACE(UUID(), '-', ''))," + \
-        "'{}'," + \
-        "'{}'" + \
+        "{}," + \
+        "\"{}\"," + \
+        "\"{}\"" + \
         ")"
     parent_child_query = "INSERT INTO Parent_Child VALUES (UNHEX('{}'), UNHEX('{}'))"
-    with open(source, 'r', encoding='utf-8') as f:
-        offset = 0
-        while True:
-            data_chunk = f.read(partition_size)
-            if not data_chunk:
-                break
+    df = pd.read_csv(source)
+    rowsPerPartition = (df.shape[0]*partition_size)//file_size
+    addIndex = True
+    for hash_val, data in df.groupby(by=hash_attr):
+        num_partitions = 1+(data.shape[0]//rowsPerPartition)
+        data = data.to_records()
+        res = []
+        if addIndex:
+            res = [data.dtype.names]
+            addIndex = False
+        for chunk in np.array_split(data, num_partitions):
+            res.extend(chunk.tolist())
+            chunk_str = str(res)
             for _ in range(REPLICATION_FACTOR):
                 block_id = "".join(choices(string.ascii_letters, k=32))
                 datanode_num = randint(1, 3)
-                cursor.execute(blk_info_query.format(block_id, partition_size, datanode_num, offset))
-                cursor.execute(datanode_query.format(datanode_num, block_id, data_chunk))
-            offset += 1
-        cursor.execute(parent_child_query.format(parent_inode_num, inode_num))
+                cursor.execute(blk_info_query.format(block_id, getsizeof(chunk_str), datanode_num))
+                cursor.execute(datanode_query.format(datanode_num, hash_val, chunk_str))
+    cursor.execute(parent_child_query.format(parent_inode_num, inode_num))
     cursor.close()
     conn.commit()
     conn.close()

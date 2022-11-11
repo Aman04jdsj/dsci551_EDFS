@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS Namenode
   mtime TIMESTAMP,
   atime TIMESTAMP,
   ctime TIMESTAMP NOT NULL,
-  permission smallint NOT NULL,
+  permission SMALLINT NOT NULL,
   PRIMARY KEY (inode_num)
 );
 
@@ -22,37 +22,25 @@ CREATE TABLE IF NOT EXISTS Block_info_table
   blk_id VARCHAR(32),
   file_inode BINARY(16) NOT NULL,
   num_bytes INT NOT NULL,
-  datanode_num smallint NOT NULL,
-  offset smallint NOT NULL,
+  datanode_num SMALLINT NOT NULL,
   PRIMARY KEY (blk_id),
   FOREIGN KEY (file_inode) REFERENCES Namenode(inode_num) ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS Datanode_1
+CREATE TABLE IF NOT EXISTS Datanode
 (
   data_block_id BINARY(16),
-  block_id VARCHAR(32) NOT NULL,
+  datanode_num SMALLINT NOT NULL,
+  hash_attribute VARCHAR(32),
   content TEXT,
-  PRIMARY KEY (data_block_id),
-  FOREIGN KEY (block_id) REFERENCES Block_info_table(blk_id) ON UPDATE CASCADE ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS Datanode_2
-(
-  data_block_id BINARY(16),
-  block_id VARCHAR(32) NOT NULL,
-  content TEXT,
-  PRIMARY KEY (data_block_id),
-  FOREIGN KEY (block_id) REFERENCES Block_info_table(blk_id) ON UPDATE CASCADE ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS Datanode_3
-(
-  data_block_id BINARY(16),
-  block_id VARCHAR(32) NOT NULL,
-  content TEXT,
-  PRIMARY KEY (data_block_id),
-  FOREIGN KEY (block_id) REFERENCES Block_info_table(blk_id) ON UPDATE CASCADE ON DELETE CASCADE
+  PRIMARY KEY (data_block_id, datanode_num, hash_attribute)
+)
+PARTITION BY RANGE(datanode_num)
+SUBPARTITION BY KEY(hash_attribute)
+SUBPARTITIONS 10 (
+  PARTITION datanode1 VALUES LESS THAN (2),
+  PARTITION datanode2 VALUES LESS THAN (3),
+  PARTITION datanode3 VALUES LESS THAN MAXVALUE
 );
 
 CREATE TABLE IF NOT EXISTS Parent_Child
