@@ -30,22 +30,14 @@ def rm() -> tuple[str, int]:
     This function removes a file/directory from the EDFS. Returns error if directory is not empty or if path is invalid
     Arguments:
         path: Path of the file/directory in the EDFS
-        type: Type of the node being deleted
     '''
     path = request.args.get('path')
-    node_type = request.args.get('type')
+    if path == "/":
+        return f"Cannot remove {path}: Root directory", 400
     _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
     if missingChildDepth != -1:
         return f"Cannot remove {path}: No such file or directory", 400
-    query = "DELETE nn, pc FROM Namenode nn" + \
-        " INNER JOIN Parent_Child pc ON nn.inode_num = pc.child_inode" + \
-        f" WHERE nn.name = '{path}'"
-    if node_type == 'file':
-        query = "DELETE nn, bi, d, pc FROM Namenode nn" + \
-            " INNER JOIN Block_info_table bi ON nn.inode_num = bi.file_inode" + \
-            " INNER JOIN Parent_Child pc ON nn.inode_num = pc.child_inode" + \
-            " INNER JOIN Datanode d ON bi.blk_id = d.blk_id" + \
-            f" WHERE nn.name = '{path}'"
+    query = f"SELECT child_inode FROM Namenode nn LEFT JOIN Parent_Child pc ON nn.inode_num = pc.parent_inode WHERE nn.name = '{path}'"
     conn = pymysql.connect(
         host=HOST_NAME,
         user=DB_USERNAME, 
@@ -53,6 +45,17 @@ def rm() -> tuple[str, int]:
         database=DATABASE
     )
     cursor = conn.cursor()
+    cursor.execute(query)
+    res = cursor.fetchall()
+    child_inode = res[0][0]
+    if child_inode:
+        return f"Cannot remove {path}: Directory is not empty", 400
+    query = "DELETE nn, nn2, pc, bi, d FROM Namenode nn" + \
+        " INNER JOIN Namenode nn2 ON nn.inode_num = nn2.inode_num" + \
+        " INNER JOIN Parent_Child pc ON nn.inode_num = pc.child_inode" + \
+        " LEFT JOIN Block_info_table bi ON nn.inode_num = bi.file_inode" + \
+        " LEFT JOIN Datanode d ON bi.blk_id = d.blk_id" + \
+        f" WHERE nn.name = '{path}'"
     cursor.execute(query)
     cursor.close()
     conn.commit()
