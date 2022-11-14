@@ -25,6 +25,33 @@ DEFAULT_DIR_PERMISSION = os.environ.get('DEFAULT_DIR_PERMISSION')
 DEFAULT_FILE_PERMISSION = os.environ.get('DEFAULT_FILE_PERMISSION')
 REPLICATION_FACTOR = int(os.environ.get('REPLICATION_FACTOR'))
 
+@app.route('/readPartition', methods=['GET'])
+def readPartition() -> tuple[str, int]:
+    '''
+    This function returns the content of the partition specified by the partition parameter
+    Arguments:
+        path: Path of the file/directory in the EDFS
+        partition: Id of the partition of the file
+    '''
+    path = request.args.get('path')
+    partition = request.args.get('partition')
+    _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
+    if missingChildDepth != -1:
+        return f"{path}: No such file or directory", 400
+    query = f"SELECT content FROM Datanode WHERE data_block_id = UNHEX('{partition}')"
+    conn = pymysql.connect(
+        host=HOST_NAME,
+        user=DB_USERNAME, 
+        password = DB_PASSWORD,
+        database=DATABASE
+    )
+    cursor = conn.cursor()
+    cursor.execute(query)
+    res = cursor.fetchall()
+    if len(res) == 0:
+        return f"No content found for partition: {partition}", 400
+    return res[0][0], 200
+
 @app.route('/getPartitionLocations', methods=['GET'])
 def getPartitionLocations() -> tuple[str, int]:
     '''
