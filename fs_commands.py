@@ -1,3 +1,4 @@
+from crypt import methods
 import os
 import string
 import pymysql
@@ -23,6 +24,62 @@ MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE'))
 DEFAULT_DIR_PERMISSION = os.environ.get('DEFAULT_DIR_PERMISSION')
 DEFAULT_FILE_PERMISSION = os.environ.get('DEFAULT_FILE_PERMISSION')
 REPLICATION_FACTOR = int(os.environ.get('REPLICATION_FACTOR'))
+
+@app.route('/readPartition', methods=['GET'])
+def readPartition() -> tuple[str, int]:
+    '''
+    This function returns the content of the partition specified by the partition parameter
+    Arguments:
+        path: Path of the file/directory in the EDFS
+        partition: Id of the partition of the file
+    '''
+    path = request.args.get('path')
+    partition = request.args.get('partition')
+    _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
+    if missingChildDepth != -1:
+        return f"{path}: No such file or directory", 400
+    query = f"SELECT content FROM Datanode WHERE data_block_id = UNHEX('{partition}')"
+    conn = pymysql.connect(
+        host=HOST_NAME,
+        user=DB_USERNAME, 
+        password = DB_PASSWORD,
+        database=DATABASE
+    )
+    cursor = conn.cursor()
+    cursor.execute(query)
+    res = cursor.fetchall()
+    if len(res) == 0:
+        return f"No content found for partition: {partition}", 400
+    return res[0][0], 200
+
+@app.route('/getPartitionLocations', methods=['GET'])
+def getPartitionLocations() -> tuple[str, int]:
+    '''
+    This function returns the partition locations of a file in the EDFS. Returns error if path is invalid
+    Arguments:
+        path: Path of the file/directory in the EDFS
+    '''
+    path = request.args.get('path')
+    _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
+    if missingChildDepth != -1:
+        return f"{path}: No such file or directory", 400
+    query = "SELECT HEX(data_block_id) FROM Datanode d" + \
+        " INNER JOIN Block_info_table bi ON bi.blk_id = d.blk_id" + \
+        " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
+        f" WHERE nn.name = '{path}'"
+    conn = pymysql.connect(
+        host=HOST_NAME,
+        user=DB_USERNAME, 
+        password = DB_PASSWORD,
+        database=DATABASE
+    )
+    cursor = conn.cursor()
+    cursor.execute(query)
+    res = cursor.fetchall()
+    partitions = [id[0] for id in res]
+    if len(partitions) == 0:
+        return f"No partitions found for {path}", 204
+    return f"Partitions: {partitions}", 200
 
 @app.route('/rm', methods=['GET'])
 def rm() -> tuple[str, int]:
@@ -61,7 +118,6 @@ def rm() -> tuple[str, int]:
     conn.commit()
     conn.close()
     return f"Deleted {path}", 200
-
 
 @app.route('/put', methods=['GET'])
 def put() -> tuple[str, int]:
@@ -189,7 +245,7 @@ def ls() -> tuple[str, int]:
         lsinfo = ""
         for row in res:
             formatted_permission = format_permissions(row[1])
-            lsinfo += row[0]+formatted_permission
+            lsinfo += row[0]+formatted_permission+'\t'
             lsinfo += '\t'.join(str(i) if i else '-' for i in row[2:]) + '\n'
         if lsinfo:
             lsinfo = f"Found {len(res)} items\n" + lsinfo
@@ -245,7 +301,6 @@ def mkdir() -> tuple[str, int]:
         conn.commit()
         conn.close()
         return "", 200
-    
         
 def is_valid_path(nodes: list) -> tuple[str, int]:
     '''
