@@ -245,7 +245,7 @@ def ls() -> tuple[str, int]:
         lsinfo = ""
         for row in res:
             formatted_permission = format_permissions(row[1])
-            lsinfo += row[0]+formatted_permission
+            lsinfo += row[0]+formatted_permission+'\t'
             lsinfo += '\t'.join(str(i) if i else '-' for i in row[2:]) + '\n'
         if lsinfo:
             lsinfo = f"Found {len(res)} items\n" + lsinfo
