@@ -17,3 +17,5 @@ REPLICATION_FACTOR = 2
 3. Run pip3 install -r requirements.txt in the project directory to install dependencies
 4. To run the app execute the command ```flask --app fs_commands.py run```
 5. Open your browser and type 127.0.0.1:5000/command-name?args -> Replace with actual command and arguments
+6. To run the UI, Run ```cd edfs-ui``` and then run ```npm install``` to install dependencies
+7. Run ```npm start``` to run the react app
