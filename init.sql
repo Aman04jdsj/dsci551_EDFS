@@ -36,30 +36,24 @@ CREATE TABLE IF NOT EXISTS Datanode_1
   data_block_id VARCHAR(32),
   hash_attribute VARCHAR(32),
   content TEXT,
-  PRIMARY KEY (data_block_id, hash_attribute)
-)
-PARTITION BY KEY(hash_attribute)
-PARTITIONS 10;
+  PRIMARY KEY (data_block_id)
+);
 
 CREATE TABLE IF NOT EXISTS Datanode_2
 (
   data_block_id VARCHAR(32),
   hash_attribute VARCHAR(32),
   content TEXT,
-  PRIMARY KEY (data_block_id, hash_attribute)
-)
-PARTITION BY KEY(hash_attribute)
-PARTITIONS 10;
+  PRIMARY KEY (data_block_id)
+);
 
 CREATE TABLE IF NOT EXISTS Datanode_3
 (
   data_block_id VARCHAR(32),
   hash_attribute VARCHAR(32),
   content TEXT,
-  PRIMARY KEY (data_block_id, hash_attribute)
-)
-PARTITION BY KEY(hash_attribute)
-PARTITIONS 10;
+  PRIMARY KEY (data_block_id)
+);
 
 DROP TRIGGER IF EXISTS data_blk_id_chk;
 DELIMITER &&
