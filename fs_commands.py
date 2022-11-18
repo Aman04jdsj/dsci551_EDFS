@@ -139,14 +139,21 @@ def getPartitionLocations() -> tuple[str, int]:
     cursor.close()
     conn.close()
     partitions = {
-        "Datanode 1": [],
-        "Datanode 2": [],
-        "Datanode 3": []
+        "Replica 1": {
+            "Datanode 1": [],
+            "Datanode 2": [],
+            "Datanode 3": []
+        },
+        "Replica 2": {
+            "Datanode 1": [],
+            "Datanode 2": [],
+            "Datanode 3": []
+        }
     }
     for id_set in res:
-        partitions["Datanode "+str(id_set[0])].append(id_set[1])
-        partitions["Datanode "+str(id_set[2])].append(id_set[3])
-    if not bool([i for i in partitions.values() if i != []]):
+        partitions["Replica 1"]["Datanode "+str(id_set[0])].append(id_set[1])
+        partitions["Replica 2"]["Datanode "+str(id_set[2])].append(id_set[3])
+    if not any(partitions["Replica 1"].values()) and not(any(partitions["Replica 2"].values())):
         return f"No partitions found for {path}", 200
     return f"Partitions: {partitions}", 200
 
