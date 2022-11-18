@@ -10,6 +10,7 @@ from flask_cors import CORS
 from pathlib import Path
 from sys import getsizeof
 from ast import literal_eval
+from math import ceil
 
 load_dotenv()
 
@@ -231,7 +232,7 @@ def put() -> tuple[str, int]:
     if 'hash' in args:
         hash_attr = args['hash']
     file_size = os.path.getsize(source)
-    partition_size = min(file_size//partitions, MAX_PARTITION_SIZE)
+    partition_size = min(ceil(file_size/partitions), MAX_PARTITION_SIZE)
     conn = pymysql.connect(
         host=HOST_NAME,
         user=DB_USERNAME, 
@@ -271,10 +272,10 @@ def put() -> tuple[str, int]:
         ")"
     parent_child_query = "INSERT INTO Parent_Child VALUES ('{}', '{}')"
     df = pd.read_csv(source)
-    rowsPerPartition = (df.shape[0]*partition_size)//file_size
+    rowsPerPartition = ceil((df.shape[0]*partition_size)/file_size)
     offset = 0
     for hash_val, data in df.groupby(by=hash_attr):
-        num_partitions = 1+(data.shape[0]//rowsPerPartition)
+        num_partitions = ceil(data.shape[0]/rowsPerPartition)
         data = data.to_records()
         res = [data.dtype.names]
         for chunk in np.array_split(data, num_partitions):
