@@ -3,12 +3,13 @@ import string
 import pymysql
 import pandas as pd
 import numpy as np
-from random import choices, randint
+from random import choices, sample
 from dotenv import load_dotenv
 from flask import Flask, request
 from flask_cors import CORS
 from pathlib import Path
 from sys import getsizeof
+from ast import literal_eval
 
 load_dotenv()
 
@@ -22,22 +23,31 @@ DATABASE = os.environ.get('DATABASE')
 MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE'))
 DEFAULT_DIR_PERMISSION = os.environ.get('DEFAULT_DIR_PERMISSION')
 DEFAULT_FILE_PERMISSION = os.environ.get('DEFAULT_FILE_PERMISSION')
-REPLICATION_FACTOR = int(os.environ.get('REPLICATION_FACTOR'))
+REPLICATION_FACTOR = 2
 
-@app.route('/readPartition', methods=['GET'])
-def readPartition() -> tuple[str, int]:
+@app.route('/cat', methods=['GET'])
+def cat() -> tuple[str, int]:
     '''
-    This function returns the content of the partition specified by the partition parameter
+    This function returns the content of the file
     Arguments:
         path: Path of the file/directory in the EDFS
-        partition: Id of the partition of the file
     '''
     path = request.args.get('path')
-    partition = request.args.get('partition')
     _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
     if missingChildDepth != -1:
         return f"{path}: No such file or directory", 400
-    query = f"SELECT content FROM Datanode WHERE data_block_id = UNHEX('{partition}')"
+    query = "SELECT IFNULL(" + \
+                "CONCAT(COALESCE(d1.content, ''), COALESCE(d2.content, ''), COALESCE(d3.content, '')), " + \
+                "CONCAT(COALESCE(d4.content, ''), COALESCE(d5.content, ''), COALESCE(d6.content, ''))" + \
+            ") AS content FROM Block_info_table bi" + \
+            " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
+            " LEFT JOIN Datanode_1 d1 ON d1.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_2 d2 ON d2.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_3 d3 ON d3.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_1 d4 ON d4.data_block_id = bi.replica2_data_blk_id" + \
+            " LEFT JOIN Datanode_2 d5 ON d5.data_block_id = bi.replica2_data_blk_id" + \
+            " LEFT JOIN Datanode_3 d6 ON d6.data_block_id = bi.replica2_data_blk_id" + \
+            f" WHERE nn.name = '{path}'"
     conn = pymysql.connect(
         host=HOST_NAME,
         user=DB_USERNAME, 
@@ -47,8 +57,60 @@ def readPartition() -> tuple[str, int]:
     cursor = conn.cursor()
     cursor.execute(query)
     res = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    if len(res) > 0:
+        df = pd.DataFrame()
+        columns = []
+        for row in res:
+            list_row = literal_eval(row[0])
+            if len(columns) == 0:
+                columns = list_row[0]
+            indices = [i[0] for i in list_row[1:]]
+            df = pd.concat([df, pd.DataFrame(list_row[1:], columns=columns, index=indices)])
+        df = df.sort_values(by='index')
+        df = df.drop('index', axis=1)
+        return df.to_string(), 200
+    return "", 200
+
+@app.route('/readPartition', methods=['GET'])
+def readPartition() -> tuple[str, int]:
+    '''
+    This function returns the content of the partition of the file specified by the partition and path parameters
+    Arguments:
+        path: Path of the file/directory in the EDFS
+        partition: Partition number to be read (1-indexed)
+    '''
+    path = request.args.get('path')
+    partition = request.args.get('partition')
+    _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
+    if missingChildDepth != -1:
+        return f"{path}: No such file or directory", 400
+    query = "SELECT IFNULL(" + \
+                "CONCAT(COALESCE(d1.content, ''), COALESCE(d2.content, ''), COALESCE(d3.content, '')), " + \
+                "CONCAT(COALESCE(d4.content, ''), COALESCE(d5.content, ''), COALESCE(d6.content, ''))" + \
+            ") AS content FROM Block_info_table bi" + \
+            " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
+            " LEFT JOIN Datanode_1 d1 ON d1.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_2 d2 ON d2.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_3 d3 ON d3.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_1 d4 ON d4.data_block_id = bi.replica2_data_blk_id" + \
+            " LEFT JOIN Datanode_2 d5 ON d5.data_block_id = bi.replica2_data_blk_id" + \
+            " LEFT JOIN Datanode_3 d6 ON d6.data_block_id = bi.replica2_data_blk_id" + \
+            f" WHERE nn.name = '{path}' AND bi.offset = {int(partition) - 1}"
+    conn = pymysql.connect(
+        host=HOST_NAME,
+        user=DB_USERNAME, 
+        password = DB_PASSWORD,
+        database=DATABASE
+    )
+    cursor = conn.cursor()
+    cursor.execute(query)
+    res = cursor.fetchall()
+    cursor.close()
+    conn.close()
     if len(res) == 0:
-        return f"No content found for partition: {partition}", 400
+        return f"No content found for partition {partition} of file {path}", 400
     return res[0][0], 200
 
 @app.route('/getPartitionLocations', methods=['GET'])
@@ -62,8 +124,7 @@ def getPartitionLocations() -> tuple[str, int]:
     _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
     if missingChildDepth != -1:
         return f"{path}: No such file or directory", 400
-    query = "SELECT HEX(data_block_id) FROM Datanode d" + \
-        " INNER JOIN Block_info_table bi ON bi.blk_id = d.blk_id" + \
+    query = "SELECT bi.replica1_datanode_num, bi.replica1_data_blk_id, bi.replica2_datanode_num, bi.replica2_data_blk_id FROM Block_info_table bi" + \
         " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
         f" WHERE nn.name = '{path}'"
     conn = pymysql.connect(
@@ -75,9 +136,18 @@ def getPartitionLocations() -> tuple[str, int]:
     cursor = conn.cursor()
     cursor.execute(query)
     res = cursor.fetchall()
-    partitions = [id[0] for id in res]
-    if len(partitions) == 0:
-        return f"No partitions found for {path}", 204
+    cursor.close()
+    conn.close()
+    partitions = {
+        "Datanode 1": [],
+        "Datanode 2": [],
+        "Datanode 3": []
+    }
+    for id_set in res:
+        partitions["Datanode "+str(id_set[0])].append(id_set[1])
+        partitions["Datanode "+str(id_set[2])].append(id_set[3])
+    if not bool([i for i in partitions.values() if i != []]):
+        return f"No partitions found for {path}", 200
     return f"Partitions: {partitions}", 200
 
 @app.route('/rm', methods=['GET'])
@@ -105,12 +175,18 @@ def rm() -> tuple[str, int]:
     res = cursor.fetchall()
     child_inode = res[0][0]
     if child_inode:
+        cursor.close()
+        conn.close()
         return f"Cannot remove {path}: Directory is not empty", 400
-    query = "DELETE nn, nn2, pc, bi, d FROM Namenode nn" + \
-        " INNER JOIN Namenode nn2 ON nn.inode_num = nn2.inode_num" + \
+    query = "DELETE nn, pc, bi, d1, d2, d3, d4, d5, d6 FROM Namenode nn" + \
         " INNER JOIN Parent_Child pc ON nn.inode_num = pc.child_inode" + \
         " LEFT JOIN Block_info_table bi ON nn.inode_num = bi.file_inode" + \
-        " LEFT JOIN Datanode d ON bi.blk_id = d.blk_id" + \
+        " LEFT JOIN Datanode_1 d1 ON bi.replica1_data_blk_id = d1.data_block_id" + \
+        " LEFT JOIN Datanode_2 d2 ON bi.replica1_data_blk_id = d2.data_block_id" + \
+        " LEFT JOIN Datanode_3 d3 ON bi.replica1_data_blk_id = d3.data_block_id" + \
+        " LEFT JOIN Datanode_1 d4 ON bi.replica2_data_blk_id = d4.data_block_id" + \
+        " LEFT JOIN Datanode_2 d5 ON bi.replica2_data_blk_id = d5.data_block_id" + \
+        " LEFT JOIN Datanode_3 d6 ON bi.replica2_data_blk_id = d6.data_block_id" + \
         f" WHERE nn.name = '{path}'"
     cursor.execute(query)
     cursor.close()
@@ -157,7 +233,7 @@ def put() -> tuple[str, int]:
     )
     cursor = conn.cursor()
     query = "INSERT INTO Namenode VALUES (" + \
-        "UNHEX(REPLACE(UUID(), '-', ''))," + \
+        "UUID()," + \
         "'-'," + \
         f"'{destination}'," + \
         f"{REPLICATION_FACTOR}," + \
@@ -167,44 +243,45 @@ def put() -> tuple[str, int]:
         f"{DEFAULT_FILE_PERMISSION}" + \
         ")"
     cursor.execute(query)
-    cursor.execute(f"SELECT HEX(inode_num) FROM Namenode WHERE name = '{destination}'")
+    cursor.execute(f"SELECT nn.inode_num, nn2.inode_num FROM Namenode nn, Namenode nn2 WHERE nn.name = '{destination}' AND nn2.name = '{curParent}'")
     res = cursor.fetchall()
     inode_num = res[0][0]
-    cursor.execute(f"SELECT HEX(inode_num) FROM Namenode WHERE name = '{curParent}'")
-    res = cursor.fetchall()
-    parent_inode_num = res[0][0]
+    parent_inode_num = res[0][1]
     blk_info_query = "INSERT INTO Block_info_table VALUES (" + \
         "'{}'," + \
-        f"UNHEX('{inode_num}')," + \
+        f"'{inode_num}'," + \
         "{}," + \
-        "{}" + \
-        ")"
-    datanode_query = "INSERT INTO Datanode VALUES (" + \
-        "UNHEX(REPLACE(UUID(), '-', ''))," + \
+        "{}," + \
         "'{}'," + \
         "{}," + \
-        "\"{}\"," + \
+        "'{}'," + \
+        "{}" + \
+        ")"
+    datanode_query = "INSERT INTO Datanode_{} VALUES (" + \
+        "'{}'," + \
+        "'{}'," + \
         "\"{}\"" + \
         ")"
-    parent_child_query = "INSERT INTO Parent_Child VALUES (UNHEX('{}'), UNHEX('{}'))"
+    parent_child_query = "INSERT INTO Parent_Child VALUES ('{}', '{}')"
     df = pd.read_csv(source)
     rowsPerPartition = (df.shape[0]*partition_size)//file_size
-    addIndex = True
+    offset = 0
     for hash_val, data in df.groupby(by=hash_attr):
         num_partitions = 1+(data.shape[0]//rowsPerPartition)
         data = data.to_records()
-        res = []
-        if addIndex:
-            res = [data.dtype.names]
-            addIndex = False
+        res = [data.dtype.names]
         for chunk in np.array_split(data, num_partitions):
             res.extend(chunk.tolist())
             chunk_str = str(res)
-            for _ in range(REPLICATION_FACTOR):
-                block_id = "".join(choices(string.ascii_letters, k=32))
-                datanode_num = randint(1, 3)
-                cursor.execute(blk_info_query.format(block_id, getsizeof(chunk_str), datanode_num))
-                cursor.execute(datanode_query.format(block_id, datanode_num, hash_val, chunk_str))
+            block_id = "".join(choices(string.ascii_letters, k=32))
+            data_block_id1 = "".join(choices(string.ascii_letters, k=32))
+            data_block_id2 = "".join(choices(string.ascii_letters, k=32))
+            data_block_ids = [data_block_id1, data_block_id2]
+            datanode_nums = sample(range(1, 4), 2)
+            for i in range(REPLICATION_FACTOR):
+                cursor.execute(datanode_query.format(datanode_nums[i], data_block_ids[i], hash_val, chunk_str))
+            cursor.execute(blk_info_query.format(block_id, getsizeof(chunk_str), offset, data_block_ids[0], datanode_nums[0], data_block_ids[1], datanode_nums[1]))
+            offset += 1
     cursor.execute(parent_child_query.format(parent_inode_num, inode_num))
     cursor.close()
     conn.commit()
@@ -275,7 +352,7 @@ def mkdir() -> tuple[str, int]:
         depth = missingChildDepth
         for node in nodes[missingChildDepth:]:
             query = "INSERT INTO Namenode VALUES (" + \
-                "UNHEX(REPLACE(UUID(), '-', ''))," + \
+                "UUID()," + \
                 "'d'," + \
                 f"'{curParent+(depth != 0)*'/'+node}'," + \
                 "NULL," + \
@@ -285,15 +362,15 @@ def mkdir() -> tuple[str, int]:
                 f"{DEFAULT_DIR_PERMISSION}" + \
                 ")"
             cursor.execute(query)
-            query = "SELECT HEX(nn.inode_num) AS parent_inode, " + \
-                "HEX(nn2.inode_num) AS child_inode " + \
+            query = "SELECT nn.inode_num AS parent_inode, " + \
+                "nn2.inode_num AS child_inode " + \
                 "FROM Namenode nn, Namenode nn2 " + \
                 f"WHERE nn.name='{curParent}' AND nn2.name='{curParent+(depth != 0)*'/'+node}'"
             cursor.execute(query)
             res = cursor.fetchall()
             query = "INSERT INTO Parent_Child VALUES (" + \
-                f"UNHEX('{res[0][0]}')," + \
-                f"UNHEX('{res[0][1]}'))"
+                f"'{res[0][0]}'," + \
+                f"'{res[0][1]}')"
             cursor.execute(query)
             curParent += (depth != 0)*'/'+node
         cursor.close()
