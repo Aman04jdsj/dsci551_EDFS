@@ -127,7 +127,7 @@ def getPartitionLocations() -> tuple[str, int]:
         return f"{path}: No such file or directory", 400
     query = "SELECT bi.replica1_datanode_num, bi.replica1_data_blk_id, bi.replica2_datanode_num, bi.replica2_data_blk_id FROM Block_info_table bi" + \
         " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
-        f" WHERE nn.name = '{path}'"
+        f" WHERE nn.name = '{path}' ORDER BY bi.offset"
     conn = pymysql.connect(
         host=HOST_NAME,
         user=DB_USERNAME, 
@@ -140,23 +140,15 @@ def getPartitionLocations() -> tuple[str, int]:
     cursor.close()
     conn.close()
     partitions = {
-        "Replica 1": {
-            "Datanode 1": [],
-            "Datanode 2": [],
-            "Datanode 3": []
-        },
-        "Replica 2": {
-            "Datanode 1": [],
-            "Datanode 2": [],
-            "Datanode 3": []
-        }
+        "Replica 1": [],
+        "Replica 2": []
     }
     for id_set in res:
-        partitions["Replica 1"]["Datanode "+str(id_set[0])].append(id_set[1])
-        partitions["Replica 2"]["Datanode "+str(id_set[2])].append(id_set[3])
-    if not any(partitions["Replica 1"].values()) and not(any(partitions["Replica 2"].values())):
+        partitions["Replica 1"].append({"Datanode "+str(id_set[0]): id_set[1]})
+        partitions["Replica 2"].append({"Datanode "+str(id_set[2]): id_set[3]})
+    if len(partitions["Replica 1"]) == 0 and len(partitions["Replica 2"]) == 0:
         return f"No partitions found for {path}", 200
-    return f"Partitions: {partitions}", 200
+    return partitions, 200
 
 @app.route('/rm', methods=['GET'])
 def rm() -> tuple[str, int]:
