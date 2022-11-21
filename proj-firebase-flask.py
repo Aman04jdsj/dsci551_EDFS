@@ -39,9 +39,215 @@ MAX_PARTITION_SIZE = 1024
 
 JSON = ".json"
 DATANODE = "datanode/"
+METADATA = "metadata/"
 NAMENODE = "namenode/"
 INODE_DIRECTORY_SECTION = "inode_directory_section/"
 INODE = "inodes/"
+
+@app.route('/rm', methods=['GET'])
+def rm() -> tuple[str, int]:
+    '''
+    This function removes a file from the EDFS. Returns error if not a file or if path is invalid
+    Arguments:
+        path: Path of the file in the EDFS
+    '''
+    path = request.args.get('path')
+    answer, order = is_valid_path(list(filter(None, path.split("/"))))
+    if not answer:
+        return f"Cannot remove {path}: No such file or directory", 400
+    last_inode = order[-1]
+    
+    url = FIREBASE_URL + NAMENODE + INODE_DIRECTORY_SECTION + "/".join(list(map(lambda x: str(x), order[:-1]))) + JSON
+    r = requests.get(url)
+    current_parent_directory = r.json()
+    directory = current_parent_directory[str(last_inode)]
+    if type(directory) == dict:
+        return f"Cannot remove {path}: is a directory", 400
+    elif directory == '$':
+        ## delete from inode-directory-section
+            del current_parent_directory[str(last_inode)]
+            if len(current_parent_directory) == 1 and list(current_parent_directory.keys())[0] == 'empty':
+                current_parent_directory['empty'] = True
+            r = requests.put(url, data = json.dumps(current_parent_directory))
+            
+        ## delete from inodes and datanodes
+            deletions_in_datanodes = {i: 0 for i in range(1, NUMBER_OF_DATANODES+1)}
+            key_inode = str(last_inode) + "_" + list(filter(None, path.split("/")))[-1].replace(".", "_")
+            url = FIREBASE_URL + NAMENODE + INODE + key_inode + JSON
+            r = requests.get(url)
+            inode = r.json()
+            blocks = inode.get('blocks', {})
+            for block_id, block in blocks.items():
+                datanode_id = block['datanode_id']
+                deletions_in_datanodes[datanode_id] += 1
+                datanode_url = FIREBASE_URL + DATANODE + str(datanode_id) + '/' + str(block_id)+ JSON            
+                r = requests.delete(datanode_url)
+                
+            datanode_metadata_url = FIREBASE_URL + DATANODE + METADATA + JSON
+            r = requests.get(datanode_metadata_url)
+            datanode_metadata = r.json()
+            for key, value in deletions_in_datanodes.items():
+                data_dict = datanode_metadata[str(key)]
+                data_dict['count'] -= value
+                if data_dict['count'] == 0:
+                    datanode_url = FIREBASE_URL + DATANODE + str(key) + JSON
+                    r = requests.patch(datanode_url, data = json.dumps({"empty": True}))
+            r = requests.put(datanode_metadata_url, data = json.dumps(datanode_metadata))
+            
+            ## delete from inodes
+            r = requests.delete(url)
+
+    return f"Deleted {path}", 200
+    
+
+
+@app.route('/rmdir', methods=['GET'])
+def rmdir() -> tuple[str, int]:
+    '''
+    This function removes a directory from the EDFS. Returns error if directory is not empty or doesn't exist, or if path is invalid
+    Arguments:
+        path: Path of the directory in the EDFS
+    '''
+    path = request.args.get('path')
+    if path == "/":
+        return f"Cannot remove {path}: Root directory", 400
+    answer, order = is_valid_path(list(filter(None, path.split("/"))))
+    if not answer:
+        return f"Cannot remove {path}: No such file or directory", 400
+    last_inode = order[-1]
+    
+    url = FIREBASE_URL + NAMENODE + INODE_DIRECTORY_SECTION + "/".join(list(map(lambda x: str(x), order[:-1]))) + JSON
+    r = requests.get(url)
+    current_parent_directory = r.json()
+    directory = current_parent_directory[str(last_inode)]    
+    if directory == '$':
+        return f"Cannot remove {path}: Not a directory", 400
+    elif type(directory) == dict:
+        if directory['empty'] == False:
+            return f"Cannot remove {path}: Directory is not empty", 400
+        else:
+            ## delete from inode-directory-section
+            del current_parent_directory[str(last_inode)]
+            if len(current_parent_directory) == 1 and list(current_parent_directory.keys())[0] == 'empty':
+                current_parent_directory['empty'] = True
+            r = requests.put(url, data = json.dumps(current_parent_directory))
+            
+            ## delete from inodes
+            key_inode = str(last_inode) + "_" + list(filter(None, path.split("/")))[-1].replace(".", "_")
+            url = FIREBASE_URL + NAMENODE + INODE + key_inode + JSON
+            r = requests.delete(url)
+        
+    return f"Deleted {path}", 200
+
+
+@app.route('/cat', methods=['GET'])
+def cat() -> tuple[str, int]:
+    '''
+    This function returns the content of the file
+    Arguments:
+        path: Path of the file/directory in the EDFS
+    '''
+    path = request.args.get('path')
+    answer, order = is_valid_path(list(filter(None, path.split("/"))))
+    if not answer:
+        return f"{path}: No such file or directory", 400
+    last_inode = order[-1]
+
+    url = FIREBASE_URL + NAMENODE + INODE + JSON + \
+        '?orderBy="inode"&equalTo=' + str(last_inode)
+    r = requests.get(url)
+    curr_inode = list(r.json().values())[0]
+    if curr_inode['type'] == 'DIRECTORY':
+        return f"{path}: {curr_inode['name']} is directory", 400
+    blocks = curr_inode.get('blocks', {})
+    if len(blocks) == 0:
+        return "", 200
+    df = pd.DataFrame()
+    for block_id, block in blocks.items():
+        datanode_id = block['datanode_id']
+        url = FIREBASE_URL + DATANODE + str(datanode_id) + '/' + str(block_id) + JSON
+        r = requests.get(url)
+        df = pd.concat([df, pd.DataFrame.from_dict(r.json())])
+    df = df.drop_duplicates()
+    df = df.sort_values(by='index')
+    df = df.drop('index', axis=1)
+    data = df.to_csv(index=False)
+    return data, 200
+
+
+@app.route('/readPartition', methods=['GET'])
+def readPartition() -> tuple[str, int]:
+    '''
+    This function returns the content of the partition of the file specified by the partition and path parameters
+    Arguments:
+        path: Path of the file/directory in the EDFS
+        partition: Partition number to be read (1-indexed)
+    '''
+    path = request.args.get('path')
+    partition = int(request.args.get('partition'))
+    answer, order = is_valid_path(list(filter(None, path.split("/"))))
+    if not answer:
+        return f"{path}: No such file or directory", 400
+    last_inode = order[-1]
+
+    url = FIREBASE_URL + NAMENODE + INODE + JSON + \
+        '?orderBy="inode"&equalTo=' + str(last_inode)
+    r = requests.get(url)
+    curr_inode = list(r.json().values())[0]
+    if curr_inode['type'] == 'DIRECTORY':
+        return f"{path}: {curr_inode['name']} is directory", 400
+    blocks = curr_inode.get('blocks', {})
+    if len(blocks) == 0:
+        return f"No partitions found for {path}", 200
+    data = ""
+    for block_id, block in blocks.items():
+        if partition-1 == block['block_num']:
+            datanode_id = block['datanode_id']
+            url = FIREBASE_URL + DATANODE + \
+                str(datanode_id) + '/' + str(block_id) + JSON
+            r = requests.get(url)
+            df = pd.DataFrame.from_dict(r.json())
+            df = df.sort_values(by='index')
+            df = df.drop('index', axis=1)
+            data = df.to_csv(index=False)
+            break
+
+    if len(data) == 0:
+        return f"No content found for partition {partition} of file {path}", 400
+    return data, 200
+
+
+@app.route('/getPartitionLocations', methods=['GET'])
+def getPartitionLocations() -> tuple[str, int]:
+    '''
+    This function returns the partition locations of a file in the EDFS. Returns error if path is invalid
+    Arguments:
+        path: Path of the file/directory in the EDFS
+    '''
+    path = request.args.get('path')
+    answer, order = is_valid_path(list(filter(None, path.split("/"))))
+    if not answer:
+        return f"{path}: No such file or directory", 400
+    last_inode = order[-1]
+
+    url = FIREBASE_URL + NAMENODE + INODE + JSON + \
+        '?orderBy="inode"&equalTo=' + str(last_inode)
+    r = requests.get(url)
+    curr_inode = list(r.json().values())[0]
+    if curr_inode['type'] == 'DIRECTORY':
+        return f"{path}: {curr_inode['name']} is directory", 400
+    partition_info = {"Replica " + str(r): []
+                      for r in range(1, REPLICATION_FACTOR+1)}
+    blocks = curr_inode['blocks']
+    if not blocks:
+        return f"No partitions found for {path}", 200
+    blocks = dict(sorted(blocks.items(), key=lambda item: item[1]['order']))
+    for block_id, block in blocks.items():
+        datanode = "Datanode " + str(block['datanode_id'])
+        replica_key = "Replica " + str(block['replica_num'])
+        partition_info[replica_key].append({datanode: block_id})
+    return f"Partitions: {partition_info}", 200
+
 
 @app.route('/put', methods=['GET'])
 def put() -> tuple[str, int]:
@@ -77,12 +283,13 @@ def put() -> tuple[str, int]:
     if 'hash' in args:
         hash_attr = args['hash']
 
-    # 3 Steps:
+    # 4 Steps:
     ## update in datanode
+    ## update in datanode_metadata
     ## update in inode
     ## update in inode_directory_section
 
-    # generate a inode
+    ## generate an inode
     url = FIREBASE_URL + NAMENODE + INODE + JSON
     r = requests.get(url)
     existing_inode_nums = list(r.json().values())
@@ -100,7 +307,7 @@ def put() -> tuple[str, int]:
     curr_inode['replication'] = REPLICATION_FACTOR
     curr_inode['type'] = "FILE"
 
-    # blocks
+    ## blocks
     file_size = os.path.getsize(source)
     df = pd.read_csv(source)
 
@@ -114,10 +321,10 @@ def put() -> tuple[str, int]:
         np.nan, '', regex=True).groupby(by=hash_attr)
     number_of_groups = len(grouped_df)
 
-    # since we are hashing on an attribute, the number of partitions is decided by number of unique values of that attribute
-    # if file can be stored in number of partitions lesser than mentioned by user, then we pick the lesser value
-    # we are not implementing bucketing so even if a block is storing a partition of a file that is very small and there is memory wastage, we do not care
-    # write-once-read-many so we do not need think about what if file is modified
+    ## since we are hashing on an attribute, the number of partitions is decided by number of unique values of that attribute
+    ## if file can be stored in number of partitions lesser than mentioned by user, then we pick the lesser value
+    ## we are not implementing bucketing so even if a block is storing a partition of a file that is very small and there is memory wastage, we do not care
+    ## write-once-read-many so we do not need think about what if file is modified
 
     if number_of_groups > partitions:
         partitions = number_of_groups
@@ -130,6 +337,7 @@ def put() -> tuple[str, int]:
     block_number_offset = 0
     blocks = {}
     actual_total_partitions = 0
+    additions_in_datanodes = {i: 0 for i in range(1, NUMBER_OF_DATANODES+1)}
     for hash_val, hash_df in grouped_df:
         hash_num_partitions = ceil(hash_df.shape[0]/rows_per_partition)
         actual_total_partitions += hash_num_partitions
@@ -160,8 +368,9 @@ def put() -> tuple[str, int]:
                 block['replica_num'] = rep_i+1
                 blocks[block_id] = block
 
-                DATANODE = "datanode/"
+                ## update in datanode
                 datanode_id = datanode_nums[rep_i]
+                additions_in_datanodes[datanode_id] += 1
                 url = FIREBASE_URL + DATANODE + str(datanode_id) + JSON
                 r = requests.get(url)
                 curr_datanode = r.json()
@@ -169,11 +378,21 @@ def put() -> tuple[str, int]:
                 curr_datanode[block_id] = data_to_put
                 r = requests.put(url, data=json.dumps(curr_datanode))
 
-    curr_inode['blocks'] = blocks
+    ## update in datanode_metadata
+    datanode_metadata_url = FIREBASE_URL + DATANODE + METADATA + JSON
+    r = requests.get(datanode_metadata_url)
+    datanode_metadata = r.json()
+    for key, value in additions_in_datanodes.items():
+        data_dict = datanode_metadata[str(key)]
+        data_dict['count'] += value
+    r = requests.put(datanode_metadata_url, data = json.dumps(datanode_metadata))
 
+    ## update in inode
+    curr_inode['blocks'] = blocks
     url = FIREBASE_URL + NAMENODE + INODE + inode_name + JSON
     r = requests.put(url, data=json.dumps(curr_inode))
 
+    ## update in inode_directory_section
     url = FIREBASE_URL + NAMENODE + INODE_DIRECTORY_SECTION + \
         "/".join(list(map(lambda x: str(x), order_of_dir))) + JSON
     r = requests.get(url)
@@ -235,7 +454,7 @@ def mkdir() -> tuple[str, int]:
     dir_val[inode_num] = {'empty': True}
     r = requests.put(url, data=json.dumps(dir_val))
 
-    return "", 200
+    return f"Created {path}", 200
 
 
 @app.route('/ls', methods=['GET'])
@@ -344,9 +563,9 @@ def ls_format_print(node) -> str:
         return ans
 
     def find_size(blocks):
-        blocks = list(filter(None, blocks))
-        sizes = list(map(lambda x: x['num_bytes'], blocks))
-        return sum(sizes)
+        blocks_list = list(blocks.values())
+        sizes = list(map(lambda x: x['num_bytes'], blocks_list))
+        return sum(sizes)//REPLICATION_FACTOR - len(blocks_list)//2 + 1
 
     answer = ['']*8
     userid, groupid, permissions = node['permission'].split(':')
