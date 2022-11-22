@@ -1,0 +1,160 @@
+{
+  "datanode": {
+    "1": {
+      "abc": "hello w",
+      "def": "orld",
+      "jkl": "orld",
+      "empty": false
+    },
+    "2": {
+      "empty": false,
+      "ghi": "hello w"
+    },
+    "3": {
+      "empty": true
+    },
+    "metadata": {
+      "1": {
+        "count": 3,
+        "location": "us-west",
+        "name": "datanode_1"
+      },
+      "2": {
+        "count": 1,
+        "location": "us-east",
+        "name": "datanode_2"
+      },
+      "3": {
+        "count": 0,
+        "location": "us-west",
+        "name": "datanode_3"
+      },
+      "storage_type": "cloud-hosted NoSQL",
+      "version": 1
+    }
+  },
+  "namenode": {
+    "inode_directory_section": [
+      null,
+      {
+        "2": {
+          "3": {
+            "6": "$",
+            "empty": false
+          },
+          "4": {
+            "empty": true
+          },
+          "5": {
+            "empty": true
+          },
+          "empty": false
+        },
+        "7": {
+          "empty": true
+        },
+        "empty": false
+      }
+    ],
+    "inodes": {
+      "1_\\": {
+        "atime": 1665272718,
+        "ctime": 1665272718,
+        "inode": 1,
+        "mtime": 1665272718,
+        "name": "\\",
+        "permission": "root:supergroup:0755",
+        "type": "DIRECTORY"
+      },
+      "2_user": {
+        "atime": 1665272719,
+        "ctime": 1665272719,
+        "inode": 2,
+        "mtime": 1665272719,
+        "name": "user",
+        "permission": "root:supergroup:0755",
+        "type": "DIRECTORY"
+      },
+      "3_aman": {
+        "atime": 1665272719,
+        "ctime": 1665272719,
+        "inode": 3,
+        "mtime": 1665272719,
+        "name": "aman",
+        "permission": "root:supergroup:0755",
+        "type": "DIRECTORY"
+      },
+      "4_chinmay": {
+        "atime": 1667283770,
+        "ctime": 1667283770,
+        "inode": 4,
+        "mtime": 1667283770,
+        "name": "chinmay",
+        "permission": "root:supergroup:0755",
+        "type": "DIRECTORY"
+      },
+      "5_sneha": {
+        "atime": 1667284882,
+        "ctime": 1667284882,
+        "inode": 5,
+        "mtime": 1667284882,
+        "name": "sneha",
+        "permission": "root:supergroup:0755",
+        "type": "DIRECTORY"
+      },
+      "6_sample_txt": {
+        "atime": 1665272718,
+        "blocks": {
+          "abc": {
+            "block_num": 1,
+            "datanode_id": 1,
+            "hash_attr_val": "random",
+            "num_bytes": 8,
+            "order": 0,
+            "replica_num": 1
+          },
+          "def": {
+            "block_num": 2,
+            "datanode_id": 1,
+            "hash_attr_val": "random",
+            "num_bytes": 5,
+            "order": 1,
+            "replica_num": 1
+          },
+          "ghi": {
+            "block_num": 3,
+            "datanode_id": 2,
+            "hash_attr_val": "random",
+            "num_bytes": 8,
+            "order": 0,
+            "replica_num": 2
+          },
+          "jkl": {
+            "block_num": 4,
+            "datanode_id": 1,
+            "hash_attr_val": "random",
+            "num_bytes": 5,
+            "order": 1,
+            "replica_num": 2
+          }
+        },
+        "ctime": 1665272718,
+        "inode": 6,
+        "mtime": 1665272718,
+        "name": "sample.txt",
+        "permission": "root:supergroup:0644",
+        "replication": 2,
+        "type": "FILE"
+      },
+      "7_file": {
+        "atime": 1668986747,
+        "ctime": 1668986747,
+        "inode": 7,
+        "mtime": 1668986747,
+        "name": "file",
+        "permission": "root:supergroup:0755",
+        "type": "DIRECTORY"
+      }
+    }
+  }
+}
