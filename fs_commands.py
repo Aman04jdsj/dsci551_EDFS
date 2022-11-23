@@ -1,3 +1,4 @@
+from typing import Callable, Union
 import os
 import string
 import pymysql
@@ -87,32 +88,7 @@ def readPartition() -> tuple[str, int]:
     _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
     if missingChildDepth != -1:
         return f"{path}: No such file or directory", 400
-    query = "SELECT IFNULL(" + \
-                "CONCAT(COALESCE(d1.content, ''), COALESCE(d2.content, ''), COALESCE(d3.content, '')), " + \
-                "CONCAT(COALESCE(d4.content, ''), COALESCE(d5.content, ''), COALESCE(d6.content, ''))" + \
-            ") AS content FROM Block_info_table bi" + \
-            " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
-            " LEFT JOIN Datanode_1 d1 ON d1.data_block_id = bi.replica1_data_blk_id" + \
-            " LEFT JOIN Datanode_2 d2 ON d2.data_block_id = bi.replica1_data_blk_id" + \
-            " LEFT JOIN Datanode_3 d3 ON d3.data_block_id = bi.replica1_data_blk_id" + \
-            " LEFT JOIN Datanode_1 d4 ON d4.data_block_id = bi.replica2_data_blk_id" + \
-            " LEFT JOIN Datanode_2 d5 ON d5.data_block_id = bi.replica2_data_blk_id" + \
-            " LEFT JOIN Datanode_3 d6 ON d6.data_block_id = bi.replica2_data_blk_id" + \
-            f" WHERE nn.name = '{path}' AND bi.offset = {int(partition) - 1}"
-    conn = pymysql.connect(
-        host=HOST_NAME,
-        user=DB_USERNAME, 
-        password = DB_PASSWORD,
-        database=DATABASE
-    )
-    cursor = conn.cursor()
-    cursor.execute(query)
-    res = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    if len(res) == 0:
-        return f"No content found for partition {partition} of file {path}", 400
-    return res[0][0], 200
+    return readPartitionContent(path, partition)
 
 @app.route('/getPartitionLocations', methods=['GET'])
 def getPartitionLocations() -> tuple[str, int]:
@@ -122,33 +98,7 @@ def getPartitionLocations() -> tuple[str, int]:
         path: Path of the file/directory in the EDFS
     '''
     path = request.args.get('path')
-    _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
-    if missingChildDepth != -1:
-        return f"{path}: No such file or directory", 400
-    query = "SELECT bi.replica1_datanode_num, bi.replica1_data_blk_id, bi.replica2_datanode_num, bi.replica2_data_blk_id FROM Block_info_table bi" + \
-        " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
-        f" WHERE nn.name = '{path}' ORDER BY bi.offset"
-    conn = pymysql.connect(
-        host=HOST_NAME,
-        user=DB_USERNAME, 
-        password = DB_PASSWORD,
-        database=DATABASE
-    )
-    cursor = conn.cursor()
-    cursor.execute(query)
-    res = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    partitions = {
-        "Replica 1": [],
-        "Replica 2": []
-    }
-    for id_set in res:
-        partitions["Replica 1"].append({"Datanode "+str(id_set[0]): id_set[1]})
-        partitions["Replica 2"].append({"Datanode "+str(id_set[2]): id_set[3]})
-    if len(partitions["Replica 1"]) == 0 and len(partitions["Replica 2"]) == 0:
-        return f"No partitions found for {path}", 200
-    return partitions, 200
+    return getPartitionIds(path)
 
 @app.route('/rm', methods=['GET'])
 def rm() -> tuple[str, int]:
@@ -250,6 +200,7 @@ def put() -> tuple[str, int]:
     blk_info_query = "INSERT INTO Block_info_table VALUES (" + \
         "'{}'," + \
         f"'{inode_num}'," + \
+        "'{}'," + \
         "{}," + \
         "{}," + \
         "'{}'," + \
@@ -258,7 +209,6 @@ def put() -> tuple[str, int]:
         "{}" + \
         ")"
     datanode_query = "INSERT INTO Datanode_{} VALUES (" + \
-        "'{}'," + \
         "'{}'," + \
         "\"{}\"" + \
         ")"
@@ -279,8 +229,8 @@ def put() -> tuple[str, int]:
             data_block_ids = [data_block_id1, data_block_id2]
             datanode_nums = sample(range(1, 4), 2)
             for i in range(REPLICATION_FACTOR):
-                cursor.execute(datanode_query.format(datanode_nums[i], data_block_ids[i], hash_val, chunk_str))
-            cursor.execute(blk_info_query.format(block_id, getsizeof(chunk_str), offset, data_block_ids[0], datanode_nums[0], data_block_ids[1], datanode_nums[1]))
+                cursor.execute(datanode_query.format(datanode_nums[i], data_block_ids[i], chunk_str))
+            cursor.execute(blk_info_query.format(block_id, hash_val, getsizeof(chunk_str), offset, data_block_ids[0], datanode_nums[0], data_block_ids[1], datanode_nums[1]))
             offset += 1
     cursor.execute(parent_child_query.format(parent_inode_num, inode_num))
     cursor.close()
@@ -377,7 +327,45 @@ def mkdir() -> tuple[str, int]:
         conn.commit()
         conn.close()
         return "", 200
-        
+
+@app.route('/getAvgPrice', methods = ['GET'])
+def getAvgPrice() -> tuple[str, int]:
+    path = request.args.get('path')
+    hash = request.args.get('hash')
+    partitions, status = getPartitionIds(path, hash)
+    res = ""
+    if status == 200:
+        totalAvg = 0
+        totalSize = 0
+        for partition, _ in partitions["Replica 1"].items():
+            response, m_status = mapPartition(path, partition, calcAvg)
+            if m_status == 200:
+                totalAvg += response["data"]["average"]*response["data"]["size"]
+                totalSize += response["data"]["size"]
+        res = f"The average price of {hash} is {totalAvg/totalSize}"
+    return res, 200
+
+def mapPartition(path: str, partition: str, callback: Callable[[str], tuple[dict, int]]) -> tuple[dict, int]:
+    '''
+    This function takes partition identified by partitionId and transforms the data in it according to the callback function
+    Arguments:
+        path - The path of the file in the EDFS
+        partition - Partition number of the partition
+        callback - The callback function used to transform the data in the partition
+    Returns:
+        res - The data after transforming the content from the partition
+    '''
+    res, status = readPartitionContent(path, partition)
+    if status == 200:
+        return callback(res)
+    return {
+        "message": res,
+        "data": {}
+    }, status
+
+def reduce(result: list) -> any:
+    pass
+
 def is_valid_path(nodes: list) -> tuple[str, int]:
     '''
     Helper function to check if given path exists in the EDFS
@@ -439,3 +427,80 @@ def format_permissions(permission: int) -> str:
                 res += '-'
         power = power//10
     return res
+
+def getPartitionIds(path: str, hash: str = None) -> tuple[Union[str, dict], int]:
+    _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
+    if missingChildDepth != -1:
+        return f"{path}: No such file or directory", 400
+    query = "SELECT bi.offset, bi.replica1_datanode_num, bi.replica1_data_blk_id, bi.replica2_datanode_num, bi.replica2_data_blk_id FROM Block_info_table bi" + \
+        " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
+        f" WHERE nn.name = '{path}'"
+    if hash:
+        query += f" AND bi.hash_attribute = '{hash}'"
+    query += " ORDER BY bi.offset"
+    conn = pymysql.connect(
+        host=HOST_NAME,
+        user=DB_USERNAME, 
+        password = DB_PASSWORD,
+        database=DATABASE
+    )
+    cursor = conn.cursor()
+    cursor.execute(query)
+    res = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    partitions = {
+        "Replica 1": dict(),
+        "Replica 2": dict()
+    }
+    for id_set in res:
+        partitions["Replica 1"][str(id_set[0]+1)] = {
+            "Datanode "+str(id_set[1]): id_set[2]
+        }
+        partitions["Replica 2"][str(id_set[0]+1)] = {
+            "Datanode "+str(id_set[3]): id_set[4]
+        }
+    if not partitions["Replica 1"] and not partitions["Replica 2"]:
+        return f"No partitions found for {path}", 200
+    return partitions, 200
+
+def readPartitionContent(path: str, partition: int) -> str:
+    query = "SELECT IFNULL(" + \
+                "CONCAT(COALESCE(d1.content, ''), COALESCE(d2.content, ''), COALESCE(d3.content, '')), " + \
+                "CONCAT(COALESCE(d4.content, ''), COALESCE(d5.content, ''), COALESCE(d6.content, ''))" + \
+            ") AS content FROM Block_info_table bi" + \
+            " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
+            " LEFT JOIN Datanode_1 d1 ON d1.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_2 d2 ON d2.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_3 d3 ON d3.data_block_id = bi.replica1_data_blk_id" + \
+            " LEFT JOIN Datanode_1 d4 ON d4.data_block_id = bi.replica2_data_blk_id" + \
+            " LEFT JOIN Datanode_2 d5 ON d5.data_block_id = bi.replica2_data_blk_id" + \
+            " LEFT JOIN Datanode_3 d6 ON d6.data_block_id = bi.replica2_data_blk_id" + \
+            f" WHERE nn.name = '{path}' AND bi.offset = {int(partition) - 1}"
+    conn = pymysql.connect(
+        host=HOST_NAME,
+        user=DB_USERNAME, 
+        password = DB_PASSWORD,
+        database=DATABASE
+    )
+    cursor = conn.cursor()
+    cursor.execute(query)
+    res = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    if len(res) == 0:
+        return f"No content found for partition {partition} of file {path}", 400
+    return res[0][0], 200
+
+def calcAvg(data: str) -> tuple[dict, int]:
+    data = literal_eval(data)
+    df = pd.DataFrame(data[1:], columns=data[0])
+    df = df.sort_values(by='index')
+    df = df.drop('index', axis=1)
+    return {
+        "message": "Successfully calculated average",
+        "data": {
+            "average": df["price"].mean(),
+            "size": len(df.index)
+        }
+    }, 200

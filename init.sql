@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS Block_info_table
 (
   blk_id VARCHAR(32),
   file_inode VARCHAR(36) NOT NULL,
+  hash_attribute VARCHAR(32),
   num_bytes INT NOT NULL,
   offset SMALLINT NOT NULL,
   replica1_data_blk_id VARCHAR(32) NOT NULL,
@@ -34,7 +35,6 @@ CREATE TABLE IF NOT EXISTS Block_info_table
 CREATE TABLE IF NOT EXISTS Datanode_1
 (
   data_block_id VARCHAR(32),
-  hash_attribute VARCHAR(32),
   content TEXT,
   PRIMARY KEY (data_block_id)
 );
@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS Datanode_1
 CREATE TABLE IF NOT EXISTS Datanode_2
 (
   data_block_id VARCHAR(32),
-  hash_attribute VARCHAR(32),
   content TEXT,
   PRIMARY KEY (data_block_id)
 );
@@ -50,7 +49,6 @@ CREATE TABLE IF NOT EXISTS Datanode_2
 CREATE TABLE IF NOT EXISTS Datanode_3
 (
   data_block_id VARCHAR(32),
-  hash_attribute VARCHAR(32),
   content TEXT,
   PRIMARY KEY (data_block_id)
 );
