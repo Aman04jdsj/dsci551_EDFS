@@ -106,7 +106,7 @@
         "atime": 1665272718,
         "blocks": {
           "abc": {
-            "block_num": 1,
+            "block_num": 0,
             "datanode_id": 1,
             "hash_attr_val": "random",
             "num_bytes": 8,
@@ -114,7 +114,7 @@
             "replica_num": 1
           },
           "def": {
-            "block_num": 2,
+            "block_num": 1,
             "datanode_id": 1,
             "hash_attr_val": "random",
             "num_bytes": 5,
@@ -122,7 +122,7 @@
             "replica_num": 1
           },
           "ghi": {
-            "block_num": 3,
+            "block_num": 0,
             "datanode_id": 2,
             "hash_attr_val": "random",
             "num_bytes": 8,
@@ -130,7 +130,7 @@
             "replica_num": 2
           },
           "jkl": {
-            "block_num": 4,
+            "block_num": 1,
             "datanode_id": 1,
             "hash_attr_val": "random",
             "num_bytes": 5,
