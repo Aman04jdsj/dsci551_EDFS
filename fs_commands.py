@@ -1,4 +1,3 @@
-from typing import Callable, Union
 import os
 import string
 import pymysql
@@ -12,6 +11,8 @@ from pathlib import Path
 from sys import getsizeof
 from ast import literal_eval
 from math import ceil
+from typing import Callable, Union
+from multiprocessing import Pool
 
 load_dotenv()
 
@@ -330,22 +331,26 @@ def mkdir() -> tuple[str, int]:
 
 @app.route('/getAvgPrice', methods = ['GET'])
 def getAvgPrice() -> tuple[str, int]:
-    path = request.args.get('path')
-    hash = request.args.get('hash')
+    args = request.args.to_dict()
+    path = args["path"]
+    hash = args["hash"]
+    debug = False
+    if "debug" in args:
+        debug = bool(request.args.get("debug"))
     partitions, status = getPartitionIds(path, hash)
-    res = ""
+    resultPromises = []
     if status == 200:
-        totalAvg = 0
-        totalSize = 0
-        for partition, _ in partitions["Replica 1"].items():
-            response, m_status = mapPartition(path, partition, calcAvg)
-            if m_status == 200:
-                totalAvg += response["data"]["average"]*response["data"]["size"]
-                totalSize += response["data"]["size"]
-        res = f"The average price of {hash} is {totalAvg/totalSize}"
-    return res, 200
+        with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
+            if partitions["Replica 1"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, debug)) for partition, _ in partitions["Replica 1"].items()]
+            elif partitions["Replica 2"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, debug)) for partition, _ in partitions["Replica 2"].items()]
+            results = [promise.get() for promise in resultPromises]
+        pool.join()
+        return reduce(results, combineAverages, debug)
+    return partitions, status
 
-def mapPartition(path: str, partition: str, callback: Callable[[str], tuple[dict, int]]) -> tuple[dict, int]:
+def mapPartition(path: str, partition: str, callback: Callable[[str], tuple[dict, int]], debug: bool = False) -> tuple[dict, int]:
     '''
     This function takes partition identified by partitionId and transforms the data in it according to the callback function
     Arguments:
@@ -357,14 +362,21 @@ def mapPartition(path: str, partition: str, callback: Callable[[str], tuple[dict
     '''
     res, status = readPartitionContent(path, partition)
     if status == 200:
-        return callback(res)
+        output, s = callback(res)
+        if s == 200 and debug:
+            output["explanation"] = {
+                "Partition": partition,
+                "Input": literal_eval(res),
+                "Output": output["data"]
+            }
+        return output, s
     return {
         "message": res,
         "data": {}
     }, status
 
-def reduce(result: list) -> any:
-    pass
+def reduce(results: list, callback: Callable[[list, bool], tuple[str, int]], debug: bool = False) -> tuple[str, int]:
+    return callback(results, debug)
 
 def is_valid_path(nodes: list) -> tuple[str, int]:
     '''
@@ -504,3 +516,17 @@ def calcAvg(data: str) -> tuple[dict, int]:
             "size": len(df.index)
         }
     }, 200
+
+def combineAverages(results: list, debug: bool) -> tuple[str, int]:
+    cumulativeAvg = sum([0 if status != 200 else result["data"]["average"]*result["data"]["size"] for result, status in results])
+    totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
+    res = {
+        "result": "No data found"
+    }
+    status = 400
+    if totalCount > 0:
+        res["result"] = f"The overall average is {(cumulativeAvg/totalCount)}"
+        if debug:
+            res["explanation"] = [result['explanation'] for result, _ in results]
+        status = 200
+    return res, status
