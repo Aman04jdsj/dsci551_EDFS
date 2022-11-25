@@ -52,7 +52,7 @@ const Node = () => {
             {
                 content?.items.map(item => (
                     <div
-                        onClick={() => {
+                        onDoubleClick={() => {
                             if (item.type === "folder") {
                                 setFilePath(filePath+"/"+item.name);
                             }

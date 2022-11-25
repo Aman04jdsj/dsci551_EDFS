@@ -40,3 +40,22 @@ label {
   font-size: calc(10px + 2vmin);
   color: white;
 }
+
+.edfs-terminal {
+  background-color: black;
+  color: greenyellow;
+  height: 400px;
+  padding: 10px;
+  margin-bottom: 50px;
+}
+
+.terminal-input {
+  background-color: transparent;
+  color: white;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+input:focus {
+  outline: none;
+}
