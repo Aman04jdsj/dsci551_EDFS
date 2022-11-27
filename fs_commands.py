@@ -29,7 +29,7 @@ DEFAULT_FILE_PERMISSION = os.environ.get('DEFAULT_FILE_PERMISSION')
 REPLICATION_FACTOR = 2
 
 @app.route('/cat', methods=['GET'])
-def cat() -> tuple[str, int]:
+def cat() -> tuple[object, int]:
     '''
     This function returns the content of the file
     Arguments:
@@ -38,7 +38,10 @@ def cat() -> tuple[str, int]:
     path = request.args.get('path')
     _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
     if missingChildDepth != -1:
-        return f"{path}: No such file or directory", 400
+        return {
+            "response": f"{path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
     query = "SELECT IFNULL(" + \
                 "CONCAT(COALESCE(d1.content, ''), COALESCE(d2.content, ''), COALESCE(d3.content, '')), " + \
                 "CONCAT(COALESCE(d4.content, ''), COALESCE(d5.content, ''), COALESCE(d6.content, ''))" + \
@@ -73,11 +76,17 @@ def cat() -> tuple[str, int]:
             df = pd.concat([df, pd.DataFrame(list_row[1:], columns=columns, index=indices)])
         df = df.sort_values(by='index')
         df = df.drop('index', axis=1)
-        return df.to_string(), 200
-    return "", 200
+        return {
+            "response": df.to_string(),
+            "status": "EDFS200"
+        }, 200
+    return {
+        "response": "",
+        "status": "EDFS204"
+    }, 200
 
 @app.route('/readPartition', methods=['GET'])
-def readPartition() -> tuple[str, int]:
+def readPartition() -> tuple[object, int]:
     '''
     This function returns the content of the partition of the file specified by the partition and path parameters
     Arguments:
@@ -88,21 +97,36 @@ def readPartition() -> tuple[str, int]:
     partition = request.args.get('partition')
     _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
     if missingChildDepth != -1:
-        return f"{path}: No such file or directory", 400
-    return readPartitionContent(path, partition)
+        return {
+            "response": f"{path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
+    response, status = readPartitionContent(path, partition)
+    df = pd.DataFrame()
+    if status == 200:
+        data = literal_eval(response)
+        df = pd.DataFrame(data[1:], columns=data[0])
+    return {
+        "response": df.to_string(),
+        "status": "EDFS"+str(status)
+    }, 200
 
 @app.route('/getPartitionLocations', methods=['GET'])
-def getPartitionLocations() -> tuple[str, int]:
+def getPartitionLocations() -> tuple[object, int]:
     '''
     This function returns the partition locations of a file in the EDFS. Returns error if path is invalid
     Arguments:
         path: Path of the file/directory in the EDFS
     '''
     path = request.args.get('path')
-    return getPartitionIds(path)
+    response, status = getPartitionIds(path)
+    return {
+        "response": response,
+        "status": "EDFS"+str(status)
+    }, 200
 
 @app.route('/rm', methods=['GET'])
-def rm() -> tuple[str, int]:
+def rm() -> tuple[object, int]:
     '''
     This function removes a file/directory from the EDFS. Returns error if directory is not empty or if path is invalid
     Arguments:
@@ -110,10 +134,16 @@ def rm() -> tuple[str, int]:
     '''
     path = request.args.get('path')
     if path == "/":
-        return f"Cannot remove {path}: Root directory", 400
+        return {
+            "response": f"Cannot remove {path}: Root directory",
+            "status": "EDFS400"
+        }, 200
     _, missingChildDepth = is_valid_path(list(filter(None, path.split("/"))))
     if missingChildDepth != -1:
-        return f"Cannot remove {path}: No such file or directory", 400
+        return {
+            "response": f"Cannot remove {path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
     query = f"SELECT child_inode FROM Namenode nn LEFT JOIN Parent_Child pc ON nn.inode_num = pc.parent_inode WHERE nn.name = '{path}'"
     conn = pymysql.connect(
         host=HOST_NAME,
@@ -128,7 +158,10 @@ def rm() -> tuple[str, int]:
     if child_inode:
         cursor.close()
         conn.close()
-        return f"Cannot remove {path}: Directory is not empty", 400
+        return {
+            "response": f"Cannot remove {path}: Directory is not empty",
+            "status": "EDFS400"
+        }, 200
     query = "DELETE nn, pc, bi, d1, d2, d3, d4, d5, d6 FROM Namenode nn" + \
         " INNER JOIN Parent_Child pc ON nn.inode_num = pc.child_inode" + \
         " LEFT JOIN Block_info_table bi ON nn.inode_num = bi.file_inode" + \
@@ -143,10 +176,13 @@ def rm() -> tuple[str, int]:
     cursor.close()
     conn.commit()
     conn.close()
-    return f"Deleted {path}", 200
+    return {
+        "response": f"Deleted {path}",
+        "status": "EDFS200"
+    }, 200
 
 @app.route('/put', methods=['GET'])
-def put() -> tuple[str, int]:
+def put() -> tuple[object, int]:
     '''
     This function puts the file specified into the EDFS. Returns error if the path is invalid or file is invalid
     Arguments:
@@ -159,18 +195,25 @@ def put() -> tuple[str, int]:
     args = request.args.to_dict()
     source = args['source']
     if not os.path.exists(source):
-        return f"put: File does not exist: {source}", 400
+        return {
+            "response": f"put: File does not exist: {source}",
+            "status": "EDFS400"
+        }, 200
     csvFile = Path(source)
     if not csvFile.is_file or not csvFile.suffix == ".csv":
-        return f"put: Invalid file: {source}", 400
+        return {
+            "response": f"put: Invalid file: {source}",
+            "status": "EDFS400"
+        }, 200
     destination = args['destination']
     _, missingChildDepth = is_valid_path(list(filter(None, destination.split("/")))[:-1])
     if missingChildDepth != -1:
-        return f"Path does not exist: {destination}", 400
+        return {
+            "response": f"Path does not exist: {destination}",
+            "status": "EDFS400"
+        }, 200
     curParent = '/'.join(destination.split('/')[:-1])
-    partitions = 1
-    if 'partitions' in args:
-        partitions = int(args['partitions'])
+    partitions = int(args['partitions'])
     hash_attr = 0
     if 'hash' in args:
         hash_attr = args['hash']
@@ -217,18 +260,25 @@ def put() -> tuple[str, int]:
     df = pd.read_csv(source)
     rowsPerPartition = ceil((df.shape[0]*partition_size)/file_size)
     offset = 0
-    for hash_val, data in df.groupby(by=hash_attr):
+    try:
+        groups = df.groupby(by=hash_attr)
+    except KeyError:
+        df["hash"] = pd.cut(x=df[df.columns[0]], bins=partitions)
+        df["hash"] = df["hash"].astype(str)
+        groups = df.groupby(by="hash")
+        del df["hash"]
+    for hash_val, data in groups:
         num_partitions = ceil(data.shape[0]/rowsPerPartition)
         data = data.to_records()
-        res = [data.dtype.names]
         for chunk in np.array_split(data, num_partitions):
+            res = [data.dtype.names]
             res.extend(chunk.tolist())
             chunk_str = str(res)
             block_id = "".join(choices(string.ascii_letters, k=32))
             data_block_id1 = "".join(choices(string.ascii_letters, k=32))
             data_block_id2 = "".join(choices(string.ascii_letters, k=32))
             data_block_ids = [data_block_id1, data_block_id2]
-            datanode_nums = sample(range(1, 4), 2)
+            datanode_nums = sample(range(1, 4), REPLICATION_FACTOR)
             for i in range(REPLICATION_FACTOR):
                 cursor.execute(datanode_query.format(datanode_nums[i], data_block_ids[i], chunk_str))
             cursor.execute(blk_info_query.format(block_id, hash_val, getsizeof(chunk_str), offset, data_block_ids[0], datanode_nums[0], data_block_ids[1], datanode_nums[1]))
@@ -237,10 +287,13 @@ def put() -> tuple[str, int]:
     cursor.close()
     conn.commit()
     conn.close()
-    return "", 200
+    return {
+        "response": "",
+        "status": "EDFS200"
+    }, 200
 
 @app.route('/ls', methods=['GET'])
-def ls() -> tuple[str, int]:
+def ls() -> tuple[object, int]:
     '''
     This function lists the content of the given directory in the EDFS. Returns error if the directory doesn't exists.
     Arguments:
@@ -276,12 +329,18 @@ def ls() -> tuple[str, int]:
             lsinfo += '\t'.join(str(i) if i else '-' for i in row[2:]) + '\n'
         if lsinfo:
             lsinfo = f"Found {len(res)} items\n" + lsinfo
-        return lsinfo, 200
+        return {
+            "response": lsinfo,
+            "status": "EDFS200"
+        }, 200
     else:
-        return f"ls: {path}: No such file or directory", 400
+        return {
+            "response": f"ls: {path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
 
 @app.route('/mkdir', methods = ['GET'])
-def mkdir() -> tuple[str, int]:
+def mkdir() -> tuple[object, int]:
     '''
     This function creates a new directory in the EDFS. Returns error if the directory already exists.
     Arguments:
@@ -291,7 +350,10 @@ def mkdir() -> tuple[str, int]:
     nodes = list(filter(None, path.split("/")))
     curParent, missingChildDepth = is_valid_path(nodes)
     if missingChildDepth == -1:
-        return f"mkdir: {path}: File exists", 400
+        return {
+            "response": f"mkdir: {path}: File exists", 
+            "status": "EDFS400"
+        }, 200
     else:
         conn = pymysql.connect(
             host=HOST_NAME,
@@ -327,7 +389,10 @@ def mkdir() -> tuple[str, int]:
         cursor.close()
         conn.commit()
         conn.close()
-        return "", 200
+        return {
+            "response": "",
+            "status": "EDFS200"
+        }, 200
 
 @app.route('/getAvgPrice', methods = ['GET'])
 def getAvgPrice() -> tuple[str, int]:
@@ -347,8 +412,15 @@ def getAvgPrice() -> tuple[str, int]:
                 resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
-        return reduce(results, combineAverages, debug)
-    return partitions, status
+        response, red_status = reduce(results, combineAverages, debug)
+        return {
+            "response": response,
+            "status": "EDFS"+red_status
+        }, 200
+    return {
+        "response": partitions,
+        "status": "EDFS"+status
+    }, 200
 
 def mapPartition(path: str, partition: str, callback: Callable[[str], tuple[dict, int]], debug: bool = False) -> tuple[dict, int]:
     '''
@@ -476,7 +548,7 @@ def getPartitionIds(path: str, hash: str = None) -> tuple[Union[str, dict], int]
         return f"No partitions found for {path}", 200
     return partitions, 200
 
-def readPartitionContent(path: str, partition: int) -> str:
+def readPartitionContent(path: str, partition: int) -> tuple[str, int]:
     query = "SELECT IFNULL(" + \
                 "CONCAT(COALESCE(d1.content, ''), COALESCE(d2.content, ''), COALESCE(d3.content, '')), " + \
                 "CONCAT(COALESCE(d4.content, ''), COALESCE(d5.content, ''), COALESCE(d6.content, ''))" + \
