@@ -1,25 +1,20 @@
 from datetime import datetime
-import json
-from math import ceil
-from multiprocessing import Pool
-import os
-from pathlib import Path
-from random import choices, sample
-import string
-from sys import getsizeof
-import time
-from typing import Callable, Union
-
-import pandas as pd
-import numpy as np
-
 from dotenv import load_dotenv
 from flask import Flask, request
 from flask_cors import CORS
-
+from math import ceil
+from multiprocessing import Pool
+from pathlib import Path
+from random import choices, sample
+from sys import getsizeof
+from typing import Callable, Union
+import json
+import numpy as np
+import os
+import pandas as pd
 import requests
-
-####################################################################################################################################################################################################################################
+import string
+import time
 
 load_dotenv()
 
@@ -101,11 +96,17 @@ def mkdir() -> tuple[str, int]:
 
     answer, order = is_valid_path(nodes)
     if answer:
-        return f"mkdir: {path}: Directory exists", 400
+        return {
+            "response": f"mkdir: {path}: Directory exists",
+            "status": "EDFS400"
+        }, 200
 
     answer, order = is_valid_path(nodes[:-1])
     if not answer:
-        return f"mkdir: {path}: No such file or directory.", 400
+        return {
+            "response": f"mkdir: {path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
 
     last_dir = nodes[-1]  # create this directory
 
@@ -139,7 +140,10 @@ def mkdir() -> tuple[str, int]:
     dir_val[inode_num] = {'empty': True}
     r = requests.put(url, data=json.dumps(dir_val))
 
-    return f"Created {path}", 200
+    return {
+        "response": f"Created {path}",
+        "status": "EDFS200"
+    }, 200
 
 
 @app.route('/ls', methods=['GET'])
@@ -154,7 +158,10 @@ def ls() -> tuple[str, int]:
 
     answer, order = is_valid_path(nodes)
     if not answer:
-        return f"ls: {path}: No such file or directory", 400
+        return {
+            "response": f"ls: {path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
 
     url = FIREBASE_URL + NAMENODE + INODE_DIRECTORY_SECTION + \
         "/".join(list(map(lambda x: str(x), order))) + JSON
@@ -174,7 +181,10 @@ def ls() -> tuple[str, int]:
         lsinfo += ls_format_print(curr_inode) + '\n'
 
     lsinfo = f"Found {count} items\n" + lsinfo
-    return lsinfo, 200
+    return {
+        "response": lsinfo,
+        "status": "EDFS200"
+    }, 200
 
 
 def ls_format_print(node) -> str:
@@ -225,19 +235,26 @@ def ls_format_print(node) -> str:
     return info
 
 
-@app.route('/rmdir', methods=['GET'])
-def rmdir() -> tuple[str, int]:
+@app.route('/rm', methods=['GET'])
+def rm() -> tuple[object, int]:
     '''
-    This function removes a directory from the EDFS. Returns error if directory is not empty or doesn't exist, or if path is invalid
+    This function removes a file/directory from the EDFS. Returns error if directory is not empty or if path is invalid
     Arguments:
-        path: Path of the directory in the EDFS
+        path: Path of the file/directory in the EDFS
     '''
     path = request.args.get('path')
     if path == "/":
-        return f"Cannot remove {path}: Root directory", 400
+        return {
+            "response": f"Cannot remove {path}: Root directory",
+            "status": "EDFS400"
+        }, 200
     answer, order = is_valid_path(list(filter(None, path.split("/"))))
     if not answer:
-        return f"Cannot remove {path}: No such file or directory", 400
+        return {
+            "response": f"Cannot remove {path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
+
     last_inode = order[-1]
 
     url = FIREBASE_URL + NAMENODE + INODE_DIRECTORY_SECTION + \
@@ -246,58 +263,17 @@ def rmdir() -> tuple[str, int]:
     current_parent_directory = r.json()
     directory = current_parent_directory[str(last_inode)]
     if directory == '$':
-        return f"Cannot remove {path}: Not a directory", 400
-    elif type(directory) == dict:
-        if directory['empty'] == False:
-            return f"Cannot remove {path}: Directory is not empty", 400
-        else:
-            # delete from inode-directory-section
-            del current_parent_directory[str(last_inode)]
-            if len(current_parent_directory) == 1 and list(current_parent_directory.keys())[0] == 'empty':
-                current_parent_directory['empty'] = True
-            r = requests.put(url, data=json.dumps(current_parent_directory))
-
-            # delete from inodes
-            key_inode = str(last_inode) + "_" + list(filter(None,
-                                                            path.split("/")))[-1].replace(".", "_")
-            url = FIREBASE_URL + NAMENODE + INODE + key_inode + JSON
-            r = requests.delete(url)
-
-    return f"Deleted {path}", 200
-
-
-@app.route('/rm', methods=['GET'])
-def rm() -> tuple[str, int]:
-    '''
-    This function removes a file from the EDFS. Returns error if not a file or if path is invalid
-    Arguments:
-        path: Path of the file in the EDFS
-    '''
-    path = request.args.get('path')
-    answer, order = is_valid_path(list(filter(None, path.split("/"))))
-    if not answer:
-        return f"Cannot remove {path}: No such file or directory", 400
-    last_inode = order[-1]
-
-    url = FIREBASE_URL + NAMENODE + INODE_DIRECTORY_SECTION + \
-        "/".join(list(map(lambda x: str(x), order[:-1]))) + JSON
-    r = requests.get(url)
-    current_parent_directory = r.json()
-    directory = current_parent_directory[str(last_inode)]
-    if type(directory) == dict:
-        return f"Cannot remove {path}: is a directory", 400
-    elif directory == '$':
         # delete from inode-directory-section
         del current_parent_directory[str(last_inode)]
-        if len(current_parent_directory) == 1 and list(current_parent_directory.keys())[0] == 'empty':
+        if len(current_parent_directory) == 1 and 'empty' in current_parent_directory:
             current_parent_directory['empty'] = True
         r = requests.put(url, data=json.dumps(current_parent_directory))
 
         # delete from inodes and datanodes
         deletions_in_datanodes = {
             i: 0 for i in range(1, NUMBER_OF_DATANODES+1)}
-        key_inode = str(last_inode) + "_" + list(filter(None,
-                                                        path.split("/")))[-1].replace(".", "_")
+        key_inode = str(last_inode) + "_" + \
+            list(filter(None, path.split("/")))[-1].replace(".", "_")
         url = FIREBASE_URL + NAMENODE + INODE + key_inode + JSON
         r = requests.get(url)
         inode = r.json()
@@ -325,7 +301,29 @@ def rm() -> tuple[str, int]:
         # delete from inodes
         r = requests.delete(url)
 
-    return f"Deleted {path}", 200
+    elif type(directory) == dict:
+        if directory['empty'] == False:
+            return {
+                "response": f"Cannot remove {path}: Directory is not empty",
+                "status": "EDFS400"
+            }, 200
+        else:
+            # delete from inode-directory-section
+            del current_parent_directory[str(last_inode)]
+            if len(current_parent_directory) == 1 and list(current_parent_directory.keys())[0] == 'empty':
+                current_parent_directory['empty'] = True
+            r = requests.put(url, data=json.dumps(current_parent_directory))
+
+            # delete from inodes
+            key_inode = str(last_inode) + "_" + list(filter(None,
+                                                            path.split("/")))[-1].replace(".", "_")
+            url = FIREBASE_URL + NAMENODE + INODE + key_inode + JSON
+            r = requests.delete(url)
+
+    return {
+        "response": f"Deleted {path}",
+        "status": "EDFS200"
+    }, 200
 
 
 @app.route('/cat', methods=['GET'])
@@ -338,7 +336,10 @@ def cat() -> tuple[str, int]:
     path = request.args.get('path')
     answer, order = is_valid_path(list(filter(None, path.split("/"))))
     if not answer:
-        return f"{path}: No such file or directory", 400
+        return {
+            "response": f"{path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
     last_inode = order[-1]
 
     url = FIREBASE_URL + NAMENODE + INODE + JSON + \
@@ -346,10 +347,16 @@ def cat() -> tuple[str, int]:
     r = requests.get(url)
     curr_inode = list(r.json().values())[0]
     if curr_inode['type'] == 'DIRECTORY':
-        return f"{path}: {curr_inode['name']} is directory", 400
+        return {
+            "response": f"{path}: {curr_inode['name']} is directory",
+            "status": "EDFS400"
+        }, 200
     blocks = curr_inode.get('blocks', {})
     if len(blocks) == 0:
-        return "", 200
+        return {
+            "response": "",
+            "status": "EDFS204"
+        }, 200
     df = pd.DataFrame()
     for block_id, block in blocks.items():
         datanode_id = block['datanode_id']
@@ -360,8 +367,11 @@ def cat() -> tuple[str, int]:
     df = df.drop_duplicates()
     df = df.sort_values(by='index')
     df = df.drop('index', axis=1)
-    data = df.to_csv(index=False)
-    return data, 200
+    # data = df.to_csv(index=False)
+    return {
+        "response": df.to_string(),
+        "status": "EDFS200"
+    }, 200
 
 
 @app.route('/put', methods=['GET'])
@@ -378,22 +388,34 @@ def put() -> tuple[str, int]:
     args = request.args.to_dict()
     source = args['source']
     if not os.path.exists(source):
-        return f"put: File does not exist: {source}", 400
+        return {
+            "response": f"put: File does not exist: {source}",
+            "status": "EDFS400"
+        }, 200
     csvFile = Path(source)
     if not csvFile.is_file or not csvFile.suffix == ".csv":
-        return f"put: Invalid file: {source}", 400
+        return {
+            "response": f"put: Invalid file: {source}",
+            "status": "EDFS400"
+        }, 200
     destination = args['destination']
     answer, order_of_dir = is_valid_path(
         list(filter(None, destination.split("/")))[:-1])
     if not answer:
-        return f"Path does not exist: {destination}", 400
+        return {
+            "response": f"Path does not exist: {destination}",
+            "status": "EDFS400"
+        }, 200
     curr_file = destination.split('/')[-1]
     curr_parent = '/'.join(destination.split('/')[:-1])
 
-    partitions = 1
-    if 'partitions' in args:
-        partitions = int(args['partitions'])
+    ## Partitions is not an optional argument
+    # partitions = 1
+    # if 'partitions' in args:
+    #     partitions = int(args['partitions'])
+    partitions = int(args['partitions'])
     og_partitions = partitions
+    
     hash_attr = 0
     if 'hash' in args:
         hash_attr = args['hash']
@@ -516,8 +538,10 @@ def put() -> tuple[str, int]:
     dir_val[inode_num] = "$"
     r = requests.put(url, data=json.dumps(dir_val))
 
-    return f"File stored in {actual_total_partitions} partitions", 200
-
+    return {
+        "response": f"File stored in {actual_total_partitions} partitions",
+        "status": "EDFS200"
+    }, 200
 
 @app.route('/getPartitionLocations', methods=['GET'])
 def getPartitionLocations() -> tuple[str, int]:
@@ -576,7 +600,10 @@ def readPartition() -> tuple[str, int]:
     partition = int(request.args.get('partition'))
     answer, order = is_valid_path(list(filter(None, path.split("/"))))
     if not answer:
-        return f"{path}: No such file or directory", 400
+        return {
+            "response": f"{path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
     inode_num = order[-1]
 
     data, status = readPartitionContent(path, inode_num, partition)
@@ -585,8 +612,12 @@ def readPartition() -> tuple[str, int]:
         df = pd.DataFrame.from_dict(data)
         df = df.sort_values(by='index')
         df = df.drop('index', axis=1)
-        content = df.to_csv(index=False)
-    return content, status
+        # content = df.to_csv(index=False)
+        content = df.to_string()
+    return {
+        "response": content,
+        "status": "EDFS"+str(status)
+    }, 200
 
 
 def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[Union[str, dict], int]:
@@ -613,7 +644,7 @@ def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[Uni
     return data, 200
 
 
-@app.route('/getAvgArmCircum', methods = ['GET'])
+@app.route('/getAvgArmCircum', methods=['GET'])
 def getAvgArmCircum() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
@@ -621,24 +652,27 @@ def getAvgArmCircum() -> tuple[str, int]:
     debug = False
     if "debug" in args:
         debug = bool(request.args.get("debug"))
-    
+
     answer, order = is_valid_path(list(filter(None, path.split("/"))))
     if not answer:
         return f"{path}: No such file or directory", 400
     inode_num = order[-1]
-    
+
     partitions, status = getPartitionIds(path, inode_num, hash)
     resultPromises = []
     if status == 200 and isinstance(partitions, str) == False:
         with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
             if partitions["Replica 1"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, inode_num, partition, calcAvgArmCircum, debug)) for partition, _ in partitions["Replica 1"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(
+                    path, inode_num, partition, calcAvgArmCircum, debug)) for partition, _ in partitions["Replica 1"].items()]
             elif partitions["Replica 2"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, inode_num, partition, calcAvgArmCircum, debug)) for partition, _ in partitions["Replica 2"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(
+                    path, inode_num, partition, calcAvgArmCircum, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
         return reduce(results, combineAverages, debug)
     return partitions, status
+
 
 def mapPartition(path: str, inode_num: int, partition: str, callback: Callable[[str], tuple[dict, int]], debug: bool = False) -> tuple[dict, int]:
     '''
@@ -670,6 +704,7 @@ def mapPartition(path: str, inode_num: int, partition: str, callback: Callable[[
 def reduce(results: list, callback: Callable[[list, bool], tuple[str, int]], debug: bool = False) -> tuple[str, int]:
     return callback(results, debug)
 
+
 def calcAvgArmCircum(data) -> tuple[dict, int]:
     print(type(data), 'Expected List')
     df = pd.DataFrame.from_dict(data)
@@ -683,9 +718,12 @@ def calcAvgArmCircum(data) -> tuple[dict, int]:
         }
     }, 200
 
+
 def combineAverages(results: list, debug: bool) -> tuple[str, int]:
-    cumulativeAvg = sum([0 if status != 200 else result["data"]["average"]*result["data"]["size"] for result, status in results])
-    totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
+    cumulativeAvg = sum([0 if status != 200 else result["data"]["average"]
+                        * result["data"]["size"] for result, status in results])
+    totalCount = sum([0 if status != 200 else result["data"]["size"]
+                     for result, status in results])
     res = {
         "result": "No data found"
     }
@@ -693,6 +731,11 @@ def combineAverages(results: list, debug: bool) -> tuple[str, int]:
     if totalCount > 0:
         res["result"] = f"The overall average is {(cumulativeAvg/totalCount)}"
         if debug:
-            res["explanation"] = [result['explanation'] for result, _ in results]
+            res["explanation"] = [result['explanation']
+                                  for result, _ in results]
         status = 200
     return res, status
+
+
+# if __name__ == '__main__':
+#     app.run(host="localhost", port=5001, debug=True)
