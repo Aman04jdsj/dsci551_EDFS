@@ -10,7 +10,7 @@ function getFiles(path, setContent) {
         url: "/ls?path=" + (path === "" ? "/" : path)
     })
     .then((response) => {
-        const res = response.data.split("\n").filter(e => e);
+        const res = response.data.response.split("\n").filter(e => e);
         const newContent = {
             message: res[0],
             items: res.slice(1).map(item => {
