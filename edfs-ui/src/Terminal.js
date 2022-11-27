@@ -17,10 +17,6 @@ const Terminal = () => {
             let newResponse = response["data"]["response"];
             if (response["data"]["status"] === "EDFS200") {
                 switch (command[0]) {
-                    case "mkdir":
-                        newDirectory = command[1];
-                        setDirectory(command[1]);
-                        break;
                     case "rm":
                         if (directory === command[1]) {
                             let parent = command[1].split("/").slice(0, -1).join("/");
