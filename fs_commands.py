@@ -102,8 +102,12 @@ def readPartition() -> tuple[object, int]:
             "status": "EDFS400"
         }, 200
     response, status = readPartitionContent(path, partition)
+    df = pd.DataFrame()
+    if status == 200:
+        data = literal_eval(response)
+        df = pd.DataFrame(data[1:], columns=data[0])
     return {
-        "response": response,
+        "response": df.to_string(),
         "status": "EDFS"+str(status)
     }, 200
 
@@ -259,7 +263,10 @@ def put() -> tuple[object, int]:
     try:
         groups = df.groupby(by=hash_attr)
     except KeyError:
-        groups = df.groupby(by=df.columns[0])
+        df["hash"] = pd.cut(x=df[df.columns[0]], bins=partitions)
+        df["hash"] = df["hash"].astype(str)
+        groups = df.groupby(by="hash")
+        del df["hash"]
     for hash_val, data in groups:
         num_partitions = ceil(data.shape[0]/rowsPerPartition)
         data = data.to_records()

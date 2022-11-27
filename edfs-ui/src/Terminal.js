@@ -13,16 +13,9 @@ const Terminal = () => {
             url: url
         })
         .then((response) => {
-            let newDirectory = directory;
             let newResponse = response["data"]["response"];
             if (response["data"]["status"] === "EDFS200") {
                 switch (command[0]) {
-                    case "rm":
-                        if (directory === command[1]) {
-                            let parent = command[1].split("/").slice(0, -1).join("/");
-                            newDirectory = parent === "" ? "/" : parent;
-                        }
-                        break;
                     case "getPartitionLocations":
                         newResponse = JSON.stringify(newResponse, null, 4);
                         break;
@@ -31,7 +24,7 @@ const Terminal = () => {
                 }
             }
             let curInput = [...inputArr];
-            curInput.push([newResponse, newDirectory, ""]);
+            curInput.push([newResponse, ""]);
             setInputArr(curInput);
         });
     }
@@ -43,11 +36,11 @@ const Terminal = () => {
             if (command.length > 0) {
                 switch (command[0]) {
                     case "clear":
-                        setInputArr([["", directory, ""]]);
+                        setInputArr([["", ""]]);
                         break;
                     case "mkdir":
                         if (command.length !== 2) {
-                            curInput.push(["Invalid number of arguments for mkdir", directory, ""]);
+                            curInput.push(["Invalid number of arguments for mkdir", ""]);
                             setInputArr(curInput);
                         } else {
                             getEDFSOutput(command, "/mkdir?path="+command[1]);
@@ -55,7 +48,7 @@ const Terminal = () => {
                         break;
                     case "ls":
                         if (command.length !== 2) {
-                            curInput.push(["Invalid number of arguments for ls", directory, ""]);
+                            curInput.push(["Invalid number of arguments for ls", ""]);
                             setInputArr(curInput);
                         } else {
                             getEDFSOutput(command, "/ls?path="+command[1]);
@@ -63,7 +56,7 @@ const Terminal = () => {
                         break;
                     case "cat":
                         if (command.length !== 2) {
-                            curInput.push(["Invalid number of arguments for cat", directory, ""]);
+                            curInput.push(["Invalid number of arguments for cat", ""]);
                             setInputArr(curInput);
                         } else {
                             getEDFSOutput(command, "/cat?path="+command[1]);
@@ -71,7 +64,7 @@ const Terminal = () => {
                         break;
                     case "rm":
                         if (command.length !== 2) {
-                            curInput.push(["Invalid number of arguments for rm", directory, ""]);
+                            curInput.push(["Invalid number of arguments for rm", ""]);
                             setInputArr(curInput);
                         } else {
                             getEDFSOutput(command, "/rm?path="+command[1]);
@@ -79,7 +72,7 @@ const Terminal = () => {
                         break;
                     case "put":
                         if (command.length < 4 || command.length > 5) {
-                            curInput.push(["Invalid number of arguments for put", directory, ""]);
+                            curInput.push(["Invalid number of arguments for put", ""]);
                             setInputArr(curInput);
                         } else {
                             let url = "/put?source="+command[1]+"&destination="+command[2]+"&partitions="+command[3];
@@ -89,7 +82,7 @@ const Terminal = () => {
                         break;
                     case "getPartitionLocations":
                         if (command.length !== 2) {
-                            curInput.push(["Invalid number of arguments for getPartitionLocations", directory, ""]);
+                            curInput.push(["Invalid number of arguments for getPartitionLocations", ""]);
                             setInputArr(curInput);
                         } else {
                             getEDFSOutput(command, "/getPartitionLocations?path="+command[1]);
@@ -97,27 +90,26 @@ const Terminal = () => {
                         break;
                     case "readPartition":
                         if (command.length !== 3) {
-                            curInput.push(["Invalid number of arguments for readPartition", directory, ""]);
+                            curInput.push(["Invalid number of arguments for readPartition", ""]);
                             setInputArr(curInput);
                         } else {
                             getEDFSOutput(command, "/readPartition?path="+command[1]+"&partition="+command[2]);
                         }
                         break;
                     default:
-                        curInput.push(["command not found: " + command[command.length - 1], directory, ""]);
+                        curInput.push(["command not found: " + command[command.length - 1], ""]);
                         setInputArr(curInput);
                         break;
                 }
                 return;
             }
-            curInput.push(["", directory, ""]);
+            curInput.push(["", ""]);
             setInputArr(curInput);
         }
         return;
     }
     
-    const [directory, setDirectory] = useState("/");
-    const [inputArr, setInputArr] = useState([["", directory, ""]]);
+    const [inputArr, setInputArr] = useState([["", ""]]);
     return (
         <div className="edfs-terminal">
             {inputArr.map((arr, id) => {
@@ -127,16 +119,16 @@ const Terminal = () => {
                             {arr[0] &&
                                 <pre className="terminal-input">{arr[0]}</pre>
                             }
-                            {"edfs-terminal-user" + arr[1] + " $"}
+                            {"edfs-terminal-user $"}
                             <input
                                 key={"input"+id}
                                 ref={(input) => {lastInput = input;}}
                                 className="terminal-input"
                                 onKeyUp={onEnterPress}
-                                value={arr[2]}
+                                value={arr[1]}
                                 onChange={e => {
                                     const currVal = [...inputArr];
-                                    currVal[currVal.length-1][2] = e.target.value;
+                                    currVal[currVal.length-1][1] = e.target.value;
                                     setInputArr(currVal);
                                 }}
                             />
@@ -148,15 +140,16 @@ const Terminal = () => {
                         {arr[0] &&
                             <pre className="terminal-input">{arr[0]}</pre>
                         }
-                        {"edfs-terminal-user" + arr[1] + " $"}
+                        {"edfs-terminal-user $"}
                         <input
+                            disabled
                             key={"input"+id}
                             className="terminal-input"
                             onKeyUp={onEnterPress}
-                            value={arr[2]}
+                            value={arr[1]}
                             onChange={e => {
                                 const currVal = [...inputArr];
-                                currVal[currVal.length-1][2] = e.target.value;
+                                currVal[currVal.length-1][1] = e.target.value;
                                 setInputArr(currVal);
                             }}
                         />
