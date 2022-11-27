@@ -1,4 +1,6 @@
+from ast import literal_eval
 from datetime import datetime
+from io import StringIO
 from dotenv import load_dotenv
 from flask import Flask, request
 from flask_cors import CORS
@@ -85,7 +87,7 @@ def is_valid_path(nodes: list) -> tuple[bool, list]:
 
 
 @app.route('/mkdir', methods=['GET'])
-def mkdir() -> tuple[str, int]:
+def mkdir() -> tuple[object, int]:
     '''
     This function creates a new directory in the EDFS. Returns error if the directory already exists.
     Arguments:
@@ -147,7 +149,7 @@ def mkdir() -> tuple[str, int]:
 
 
 @app.route('/ls', methods=['GET'])
-def ls() -> tuple[str, int]:
+def ls() -> tuple[object, int]:
     '''
     This function lists the content of the given directory in the EDFS. Returns error if the directory doesn't exists.
     Arguments:
@@ -327,7 +329,7 @@ def rm() -> tuple[object, int]:
 
 
 @app.route('/cat', methods=['GET'])
-def cat() -> tuple[str, int]:
+def cat() -> tuple[object, int]:
     '''
     This function returns the content of the file
     Arguments:
@@ -363,11 +365,13 @@ def cat() -> tuple[str, int]:
         url = FIREBASE_URL + DATANODE + \
             str(datanode_id) + '/' + str(block_id) + JSON
         r = requests.get(url)
-        df = pd.concat([df, pd.DataFrame.from_dict(r.json())])
+        csvStringIO = StringIO(r.json())
+        part_df = pd.read_csv(csvStringIO, sep=",")
+        df = pd.concat([df, part_df])
+
     df = df.drop_duplicates()
     df = df.sort_values(by='index')
     df = df.drop('index', axis=1)
-    # data = df.to_csv(index=False)
     return {
         "response": df.to_string(),
         "status": "EDFS200"
@@ -375,7 +379,7 @@ def cat() -> tuple[str, int]:
 
 
 @app.route('/put', methods=['GET'])
-def put() -> tuple[str, int]:
+def put() -> tuple[object, int]:
     '''
     This function puts the file specified into the EDFS. Returns error if the path is invalid or file is invalid
     Arguments:
@@ -409,13 +413,13 @@ def put() -> tuple[str, int]:
     curr_file = destination.split('/')[-1]
     curr_parent = '/'.join(destination.split('/')[:-1])
 
-    ## Partitions is not an optional argument
+    # Partitions is not an optional argument
     # partitions = 1
     # if 'partitions' in args:
     #     partitions = int(args['partitions'])
     partitions = int(args['partitions'])
     og_partitions = partitions
-    
+
     hash_attr = 0
     if 'hash' in args:
         hash_attr = args['hash']
@@ -447,51 +451,54 @@ def put() -> tuple[str, int]:
     # blocks
     file_size = os.path.getsize(source)
     df = pd.read_csv(source)
+    df = df.reset_index()
 
-    attribute_type = df[hash_attr].dtypes
-    if attribute_type == np.dtype('float64') or attribute_type == np.dtype('int64'):
-        df[hash_attr].fillna(0, inplace=True)
-    else:
-        df[hash_attr].fillna("NULL", inplace=True)
+    try:
+        # If hash_attr is given, we hash and partition on that value
+        # Since we are hashing on an attribute, the number of partitions is decided by number of unique values of that attribute
+        # if file can be stored in number of partitions lesser than mentioned by user, then we pick the lesser value
+        # we are not implementing bucketing so even if a block is storing a partition of a file that is very small and there is memory wastage, we do not care
+        # write-once-read-many so we do not need think about what if file is modified
 
-    grouped_df = df.reset_index().replace(
-        np.nan, '', regex=True).groupby(by=hash_attr)
-    number_of_groups = len(grouped_df)
+        if np.issubdtype(df[hash_attr].dtypes, np.number):
+            df[hash_attr].fillna(0, inplace=True)
+        else:
+            df[hash_attr].fillna("NULL", inplace=True)
+        grouped_df = df.groupby(by=hash_attr)
+        number_of_groups = len(grouped_df)
+        if number_of_groups > partitions:
+            partitions = number_of_groups
 
-    # since we are hashing on an attribute, the number of partitions is decided by number of unique values of that attribute
-    # if file can be stored in number of partitions lesser than mentioned by user, then we pick the lesser value
-    # we are not implementing bucketing so even if a block is storing a partition of a file that is very small and there is memory wastage, we do not care
-    # write-once-read-many so we do not need think about what if file is modified
+    except KeyError:
+        # In case of a keyerror, i.e.,  no hash attribute given or hash attribute is incorrect, we
+        # will partition based on indices. Here, we will decide the number of partitions based on whether
+        # max_partition_size allows the file to be stored in the given number of partitions, or does is need more
 
-    if number_of_groups > partitions:
-        partitions = number_of_groups
-    partition_size = min(ceil(file_size/partitions), MAX_PARTITION_SIZE)
+        if ceil(file_size/partitions) > MAX_PARTITION_SIZE:
+            partitions = ceil(file_size/MAX_PARTITION_SIZE)
+        df["hash"] = pd.cut(x=df[df.columns[0]], bins=partitions)
+        df["hash"] = df["hash"].astype(str)
+        grouped_df = df.groupby(by="hash")
+        del df["hash"]
+
+    partition_size = ceil(file_size/partitions)
     rows_per_partition = ceil((df.shape[0]*partition_size)/file_size)
 
-    label_row_size = sum([len(col)+2 for col in df.columns]
-                         ) + len(df.columns) - 1
-
-    block_number_offset = -1
+    block_number_offset = 0
     blocks = {}
     actual_total_partitions = 0
     additions_in_datanodes = {i: 0 for i in range(1, NUMBER_OF_DATANODES+1)}
+    hash_count = -1
     for hash_val, hash_df in grouped_df:
+        hash_count += 1
+        if isinstance(hash_val, str) and hash_val[0] == '(' and hash_val[-1] == ']':
+            hash_val = 'index_' + str(hash_count)
         hash_num_partitions = ceil(hash_df.shape[0]/rows_per_partition)
         actual_total_partitions += hash_num_partitions
-        data = hash_df.to_dict(orient='records')
-        i = 0
-        end_row = rows_per_partition - 1
-        for order in range(hash_num_partitions):
-            block_number_offset += 1
-            if order < hash_num_partitions - 1:
-                data_to_put = data[i:end_row+1]
-                i = end_row + 1
-                end_row += rows_per_partition - 1
-            elif order == hash_num_partitions - 1:
-                data_to_put = data[i:len(data)]
-            d = [len(','.join([str(int(e)) if isinstance(e, float) and e.is_integer(
-            ) else str(e) for e in list(d.values())])) for d in data_to_put]
-            data_to_put_size = sum(d) + len(data_to_put) + label_row_size
+        # data = hash_df.to_records(index=False)
+        for order, chunk_df in enumerate(np.array_split(hash_df, hash_num_partitions)):
+            chunk_str = chunk_df.to_csv(index=False)
+            chunk_size = len(chunk_str) + 1
             datanode_nums = sample(
                 range(1, NUMBER_OF_DATANODES+1), REPLICATION_FACTOR)
             for rep_i in range(REPLICATION_FACTOR):
@@ -500,7 +507,7 @@ def put() -> tuple[str, int]:
                 block['block_num'] = block_number_offset
                 block['datanode_id'] = datanode_nums[rep_i]
                 block['hash_attr_val'] = hash_val
-                block['num_bytes'] = data_to_put_size
+                block['num_bytes'] = chunk_size
                 block['order'] = order
                 block['replica_num'] = rep_i+1
                 blocks[block_id] = block
@@ -512,8 +519,10 @@ def put() -> tuple[str, int]:
                 r = requests.get(url)
                 curr_datanode = r.json()
                 curr_datanode['empty'] = False
-                curr_datanode[block_id] = data_to_put
+                curr_datanode[block_id] = chunk_str
                 r = requests.put(url, data=json.dumps(curr_datanode))
+
+            block_number_offset += 1
 
     ## update in datanode_metadata
     datanode_metadata_url = FIREBASE_URL + DATANODE + METADATA + JSON
@@ -543,8 +552,9 @@ def put() -> tuple[str, int]:
         "status": "EDFS200"
     }, 200
 
+
 @app.route('/getPartitionLocations', methods=['GET'])
-def getPartitionLocations() -> tuple[str, int]:
+def getPartitionLocations() -> tuple[object, int]:
     '''
     This function returns the partition locations of a file in the EDFS. Returns error if path is invalid
     Arguments:
@@ -553,11 +563,17 @@ def getPartitionLocations() -> tuple[str, int]:
     path = request.args.get('path')
     answer, order = is_valid_path(list(filter(None, path.split("/"))))
     if not answer:
-        return f"{path}: No such file or directory", 400
+        return {
+            "response": f"{path}: No such file or directory",
+            "status": "EDFS400"
+        }, 200
     inode_num = order[-1]
 
     partition_info, status = getPartitionIds(path, inode_num)
-    return f"Partitions: {partition_info}", status
+    return {
+        "response": partition_info,
+        "status": "EDFS"+str(status)
+    }, 200
 
 
 def getPartitionIds(path: str, inode_num: int, hash_attr_val: str = "") -> tuple[Union[str, dict], int]:
@@ -566,8 +582,6 @@ def getPartitionIds(path: str, inode_num: int, hash_attr_val: str = "") -> tuple
         '?orderBy="inode"&equalTo=' + str(inode_num)
     r = requests.get(url)
     curr_inode = list(r.json().values())[0]
-    # if curr_inode['type'] == 'DIRECTORY':
-    #     return f"{path}: {curr_inode['name']} is directory", 400
 
     partitions = {
         "Replica 1": dict(),
@@ -575,8 +589,12 @@ def getPartitionIds(path: str, inode_num: int, hash_attr_val: str = "") -> tuple
     }
     blocks = curr_inode.get('blocks', {})
     if hash_attr_val != "":
-        blocks = dict(filter(lambda block: block[1]['hash_attr_val'] == float(
-            hash_attr_val), blocks.items()))
+        try:
+            hash_attr_val = literal_eval(hash_attr_val)
+        except ValueError:
+            hash_attr_val = hash_attr_val
+        blocks = dict(filter(
+            lambda block: block[1]['hash_attr_val'] == hash_attr_val, blocks.items()))
 
     for block_id, block in blocks.items():
         block_num = str(block['block_num'] + 1)
@@ -589,7 +607,7 @@ def getPartitionIds(path: str, inode_num: int, hash_attr_val: str = "") -> tuple
 
 
 @app.route('/readPartition', methods=['GET'])
-def readPartition() -> tuple[str, int]:
+def readPartition() -> tuple[object, int]:
     '''
     This function returns the content of the partition of the file specified by the partition and path parameters
     Arguments:
@@ -607,20 +625,19 @@ def readPartition() -> tuple[str, int]:
     inode_num = order[-1]
 
     data, status = readPartitionContent(path, inode_num, partition)
-    content = data
-    if not isinstance(data, str):
-        df = pd.DataFrame.from_dict(data)
+    if status == 200:
+        csvStringIO = StringIO(data)
+        df = pd.read_csv(csvStringIO, sep=",")
         df = df.sort_values(by='index')
         df = df.drop('index', axis=1)
-        # content = df.to_csv(index=False)
-        content = df.to_string()
+        data = df.to_string()
     return {
-        "response": content,
+        "response": data,
         "status": "EDFS"+str(status)
     }, 200
 
 
-def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[Union[str, dict], int]:
+def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[str, int]:
 
     inode_name = str(inode_num) + '_' + \
         list(filter(None, path.split("/")))[-1].replace('.', '_')
@@ -629,7 +646,7 @@ def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[Uni
     r = requests.get(url)
     blocks = r.json()
     if not blocks or len(blocks) == 0:
-        return f"No partitions found for {path}", 200
+        return f"No partitions found for {path}", 400
 
     block_id, block = list(blocks.items())[0]
     datanode_id = block['datanode_id']
@@ -638,7 +655,7 @@ def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[Uni
     r = requests.get(url)
     data = r.json()
 
-    if len(data) == 0:
+    if not data or len(data) == 0:
         return f"No content found for partition {partition} of file {path}", 400
 
     return data, 200
@@ -648,7 +665,9 @@ def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[Uni
 def getAvgArmCircum() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
-    hash = float(args["hash"])
+    hash = ""
+    if "hash" in args:
+        hash = args["hash"]
     debug = False
     if "debug" in args:
         debug = bool(request.args.get("debug"))
@@ -686,7 +705,7 @@ def mapPartition(path: str, inode_num: int, partition: str, callback: Callable[[
         res - The data after transforming the content from the partition
     '''
     res, status = readPartitionContent(path, inode_num, int(partition))
-    if status == 200 and isinstance(res, str) == False:
+    if status == 200:
         output, s = callback(res)
         if s == 200 and debug:
             output["explanation"] = {
@@ -706,8 +725,9 @@ def reduce(results: list, callback: Callable[[list, bool], tuple[str, int]], deb
 
 
 def calcAvgArmCircum(data) -> tuple[dict, int]:
-    print(type(data), 'Expected List')
-    df = pd.DataFrame.from_dict(data)
+
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
     df = df.sort_values(by='index')
     df = df.drop('index', axis=1)
     return {
@@ -737,5 +757,3 @@ def combineAverages(results: list, debug: bool) -> tuple[str, int]:
     return res, status
 
 
-# if __name__ == '__main__':
-#     app.run(host="localhost", port=5001, debug=True)
