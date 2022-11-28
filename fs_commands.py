@@ -13,6 +13,7 @@ from ast import literal_eval
 from math import ceil
 from typing import Callable, Union
 from multiprocessing import Pool
+from io import StringIO
 
 load_dotenv()
 
@@ -67,17 +68,14 @@ def cat() -> tuple[object, int]:
     conn.close()
     if len(res) > 0:
         df = pd.DataFrame()
-        columns = []
         for row in res:
-            list_row = literal_eval(row[0])
-            if len(columns) == 0:
-                columns = list_row[0]
-            indices = [i[0] for i in list_row[1:]]
-            df = pd.concat([df, pd.DataFrame(list_row[1:], columns=columns, index=indices)])
+            csvStringIO = StringIO(row[0])
+            row_df = pd.read_csv(csvStringIO, sep=",")
+            df = pd.concat([df, row_df])
         df = df.sort_values(by='index')
         df = df.drop('index', axis=1)
         return {
-            "response": df.to_string(),
+            "response": df.to_csv(index=False),
             "status": "EDFS200"
         }, 200
     return {
@@ -104,10 +102,13 @@ def readPartition() -> tuple[object, int]:
     response, status = readPartitionContent(path, partition)
     df = pd.DataFrame()
     if status == 200:
-        data = literal_eval(response)
-        df = pd.DataFrame(data[1:], columns=data[0])
+        csvStringIO = StringIO(response)
+        df = pd.read_csv(csvStringIO, sep=",")
+        df = df.sort_values(by='index')
+        df = df.drop('index', axis=1)
+        response = df.to_csv(index=False)
     return {
-        "response": df.to_string(),
+        "response": response,
         "status": "EDFS"+str(status)
     }, 200
 
@@ -258,6 +259,7 @@ def put() -> tuple[object, int]:
         ")"
     parent_child_query = "INSERT INTO Parent_Child VALUES ('{}', '{}')"
     df = pd.read_csv(source)
+    df = df.reset_index()
     rowsPerPartition = ceil((df.shape[0]*partition_size)/file_size)
     offset = 0
     try:
@@ -269,11 +271,8 @@ def put() -> tuple[object, int]:
         del df["hash"]
     for hash_val, data in groups:
         num_partitions = ceil(data.shape[0]/rowsPerPartition)
-        data = data.to_records()
         for chunk in np.array_split(data, num_partitions):
-            res = [data.dtype.names]
-            res.extend(chunk.tolist())
-            chunk_str = str(res)
+            chunk_str = chunk.to_csv(index=False)
             block_id = "".join(choices(string.ascii_letters, k=32))
             data_block_id1 = "".join(choices(string.ascii_letters, k=32))
             data_block_id2 = "".join(choices(string.ascii_letters, k=32))
@@ -394,35 +393,73 @@ def mkdir() -> tuple[object, int]:
             "status": "EDFS200"
         }, 200
 
-@app.route('/getAvgPrice', methods = ['GET'])
-def getAvgPrice() -> tuple[str, int]:
+@app.route('/getAvgFamilyIncome', methods = ['GET'])
+def getAvgFamilyIncome() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
-    hash = args["hash"]
+    hash = None
+    if "hash" in args:
+        hash = args["hash"]
     debug = False
     if "debug" in args:
-        debug = bool(request.args.get("debug"))
+        try:
+            debug = literal_eval(args["debug"])
+        except ValueError:
+            pass
     partitions, status = getPartitionIds(path, hash)
     resultPromises = []
     if status == 200:
         with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
             if partitions["Replica 1"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, debug)) for partition, _ in partitions["Replica 1"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "INDFMIN2", debug)) for partition, _ in partitions["Replica 1"].items()]
             elif partitions["Replica 2"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, debug)) for partition, _ in partitions["Replica 2"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "INDFMIN2", debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
         response, red_status = reduce(results, combineAverages, debug)
         return {
             "response": response,
-            "status": "EDFS"+red_status
+            "status": "EDFS"+str(red_status)
         }, 200
     return {
         "response": partitions,
-        "status": "EDFS"+status
+        "status": "EDFS"+str(status)
     }, 200
 
-def mapPartition(path: str, partition: str, callback: Callable[[str], tuple[dict, int]], debug: bool = False) -> tuple[dict, int]:
+@app.route('/getAvgTimeInUS', methods = ['GET'])
+def getAvgTimeInUS() -> tuple[str, int]:
+    args = request.args.to_dict()
+    path = args["path"]
+    hash = None
+    if "hash" in args:
+        hash = args["hash"]
+    debug = False
+    if "debug" in args:
+        try:
+            debug = literal_eval(args["debug"])
+        except ValueError:
+            pass
+    partitions, status = getPartitionIds(path, hash)
+    resultPromises = []
+    if status == 200:
+        with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
+            if partitions["Replica 1"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "DMDYRSUS", debug)) for partition, _ in partitions["Replica 1"].items()]
+            elif partitions["Replica 2"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "DMDYRSUS", debug)) for partition, _ in partitions["Replica 2"].items()]
+            results = [promise.get() for promise in resultPromises]
+        pool.join()
+        response, red_status = reduce(results, combineAverages, debug)
+        return {
+            "response": response,
+            "status": "EDFS"+str(red_status)
+        }, 200
+    return {
+        "response": partitions,
+        "status": "EDFS"+str(status)
+    }, 200
+
+def mapPartition(path: str, partition: str, callback: Callable[[str, str], tuple[dict, int]], column: str, debug: bool = False) -> tuple[dict, int]:
     '''
     This function takes partition identified by partitionId and transforms the data in it according to the callback function
     Arguments:
@@ -434,11 +471,11 @@ def mapPartition(path: str, partition: str, callback: Callable[[str], tuple[dict
     '''
     res, status = readPartitionContent(path, partition)
     if status == 200:
-        output, s = callback(res)
+        output, s = callback(res, column)
         if s == 200 and debug:
             output["explanation"] = {
                 "Partition": partition,
-                "Input": literal_eval(res),
+                "Input": res,
                 "Output": output["data"]
             }
         return output, s
@@ -576,15 +613,13 @@ def readPartitionContent(path: str, partition: int) -> tuple[str, int]:
         return f"No content found for partition {partition} of file {path}", 400
     return res[0][0], 200
 
-def calcAvg(data: str) -> tuple[dict, int]:
-    data = literal_eval(data)
-    df = pd.DataFrame(data[1:], columns=data[0])
-    df = df.sort_values(by='index')
-    df = df.drop('index', axis=1)
+def calcAvg(data: str, col: str) -> tuple[dict, int]:
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
     return {
         "message": "Successfully calculated average",
         "data": {
-            "average": df["price"].mean(),
+            "average": df[col].mean(),
             "size": len(df.index)
         }
     }, 200
@@ -597,7 +632,7 @@ def combineAverages(results: list, debug: bool) -> tuple[str, int]:
     }
     status = 400
     if totalCount > 0:
-        res["result"] = f"The overall average is {(cumulativeAvg/totalCount)}"
+        res["result"] = f"The overall average is {(cumulativeAvg/totalCount):.3f}"
         if debug:
             res["explanation"] = [result['explanation'] for result, _ in results]
         status = 200
