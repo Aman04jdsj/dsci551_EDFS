@@ -12,6 +12,12 @@ DATABASE = 'dsci551_project' -> Replace with your mysql database used in init.sq
 DEFAULT_DIR_PERMISSION = 755
 DEFAULT_FILE_PERMISSION = 644
 REPLICATION_FACTOR = 2
+
+FIREBASE_URL = 'enter_firebase_url'
+FIREBASE_DEFAULT_DIR_PERMISSION = "root:supergroup:0755"
+FIREBASE_DEFAULT_FILE_PERMISSION = "root:supergroup:0644"
+FIREBASE_MAX_PARTITION_SIZE = 134217728
+NUMBER_OF_DATANODES = 3
 ```
 2. Run ```mysql -u root -p < init.sql``` from project directory or mysql -u root -p from project directory and then run ```source init.sql```
 3. Run pip3 install -r requirements.txt in the project directory to install dependencies

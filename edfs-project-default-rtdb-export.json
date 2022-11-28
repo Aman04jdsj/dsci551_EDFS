@@ -1,0 +1,51 @@
+{
+  "datanode": {
+    "1": {
+      "empty": true
+    },
+    "2": {
+      "empty": true
+    },
+    "3": {
+      "empty": true
+    },
+    "metadata": {
+      "1": {
+        "count": 0,
+        "location": "us-west",
+        "name": "datanode_1"
+      },
+      "2": {
+        "count": 0,
+        "location": "us-east",
+        "name": "datanode_2"
+      },
+      "3": {
+        "count": 0,
+        "location": "us-west",
+        "name": "datanode_3"
+      },
+      "storage_type": "cloud-hosted NoSQL",
+      "version": 1
+    }
+  },
+  "namenode": {
+    "inode_directory_section": [
+      null,
+      {
+        "empty": true
+      }
+    ],
+    "inodes": {
+      "1_\\": {
+        "atime": 1665272718,
+        "ctime": 1665272718,
+        "inode": 1,
+        "mtime": 1665272718,
+        "name": "\\",
+        "permission": "root:supergroup:0755",
+        "type": "DIRECTORY"
+      }
+    }
+  }
+}
