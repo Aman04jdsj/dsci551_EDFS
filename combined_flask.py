@@ -1,3 +1,11 @@
+import json
+import numpy as np
+import os
+import pandas as pd
+import pymysql
+import requests
+import string
+import time
 from ast import literal_eval
 from datetime import datetime
 from io import StringIO
@@ -10,14 +18,6 @@ from pathlib import Path
 from random import choices, sample
 from sys import getsizeof
 from typing import Callable, Union
-import json
-import numpy as np
-import os
-import pandas as pd
-import pymysql
-import requests
-import string
-import time
 
 load_dotenv()
 
@@ -37,7 +37,6 @@ FIREBASE_URL = os.environ.get('FIREBASE_URL')
 FIREBASE_DEFAULT_DIR_PERMISSION = os.environ.get('FIREBASE_DEFAULT_DIR_PERMISSION')
 FIREBASE_DEFAULT_FILE_PERMISSION = os.environ.get('FIREBASE_DEFAULT_FILE_PERMISSION')
 FIREBASE_MAX_PARTITION_SIZE = int(os.environ.get('FIREBASE_MAX_PARTITION_SIZE'))
-
 NUMBER_OF_DATANODES = 3
 JSON = ".json"
 DATANODE = "datanode/"
@@ -46,7 +45,7 @@ NAMENODE = "namenode/"
 INODE_DIRECTORY_SECTION = "inode_directory_section/"
 INODE = "inodes/"
 
-
+# MySQL APIS
 def is_valid_path(nodes: list) -> tuple[str, int]:
     '''
     Helper function to check if given path exists in the EDFS
@@ -656,9 +655,7 @@ def combineAverages(results: list, debug: bool) -> tuple[str, int]:
         status = 200
     return res, status
 
-
-
-
+# Firebase APIS
 def firebase_is_valid_path(nodes: list) -> tuple[bool, list]:
     '''
     Helper function to check if given path exists in the EDFS

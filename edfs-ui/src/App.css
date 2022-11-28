@@ -57,9 +57,15 @@ label {
   font-size: 15px;
   font-weight: bold;
   margin: 0;
-  width: 75%;
+  width: 65%;
 }
 
 input:focus {
   outline: none;
+}
+
+.edfs-radio {
+  font-size: 20px;
+  font-weight: bold;
+  padding: 5px;
 }
