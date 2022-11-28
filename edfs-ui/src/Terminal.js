@@ -1,34 +1,37 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-const Terminal = ({apiPrefix}) => {
+const Terminal = ({ apiPrefix }) => {
     let lastInput = null;
     useEffect(() => {
         lastInput.focus();
     });
+    useEffect(() => {
+        setInputArr([["", ""]]);
+    }, [apiPrefix]);
 
     function getEDFSOutput(command, url) {
         axios({
             method: "GET",
             url: url
         })
-        .then((response) => {
-            let newResponse = response["data"]["response"];
-            if (response["data"]["status"] === "EDFS200") {
-                switch (command[0]) {
-                    case "getPartitionLocations":
-                    case "getAvgFamilyIncome":
-                    case "getAvgTimeInUS":
-                        newResponse = JSON.stringify(newResponse, null, 4);
-                        break;
-                    default:
-                        break;
+            .then((response) => {
+                let newResponse = response["data"]["response"];
+                if (response["data"]["status"] === "EDFS200") {
+                    switch (command[0]) {
+                        case "getPartitionLocations":
+                        case "getAvgFamilyIncome":
+                        case "getAvgTimeInUS":
+                            newResponse = JSON.stringify(newResponse, null, 4);
+                            break;
+                        default:
+                            break;
+                    }
                 }
-            }
-            let curInput = [...inputArr];
-            curInput.push([newResponse, ""]);
-            setInputArr(curInput);
-        });
+                let curInput = [...inputArr];
+                curInput.push([newResponse, ""]);
+                setInputArr(curInput);
+            });
     }
 
     function onEnterPress(event) {
@@ -45,7 +48,7 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for mkdir", ""]);
                             setInputArr(curInput);
                         } else {
-                            getEDFSOutput(command, apiPrefix+"mkdir?path="+command[1]);
+                            getEDFSOutput(command, apiPrefix + "mkdir?path=" + command[1]);
                         }
                         break;
                     case "ls":
@@ -53,7 +56,7 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for ls", ""]);
                             setInputArr(curInput);
                         } else {
-                            getEDFSOutput(command, apiPrefix+"ls?path="+command[1]);
+                            getEDFSOutput(command, apiPrefix + "ls?path=" + command[1]);
                         }
                         break;
                     case "cat":
@@ -61,7 +64,7 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for cat", ""]);
                             setInputArr(curInput);
                         } else {
-                            getEDFSOutput(command, apiPrefix+"cat?path="+command[1]);
+                            getEDFSOutput(command, apiPrefix + "cat?path=" + command[1]);
                         }
                         break;
                     case "rm":
@@ -69,7 +72,7 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for rm", ""]);
                             setInputArr(curInput);
                         } else {
-                            getEDFSOutput(command, apiPrefix+"rm?path="+command[1]);
+                            getEDFSOutput(command, apiPrefix + "rm?path=" + command[1]);
                         }
                         break;
                     case "put":
@@ -77,8 +80,8 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for put", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = apiPrefix+"put?source="+command[1]+"&destination="+command[2]+"&partitions="+command[3];
-                            url += command.length === 5 ? "&hash="+command[4] : "";
+                            let url = apiPrefix + "put?source=" + command[1] + "&destination=" + command[2] + "&partitions=" + command[3];
+                            url += command.length === 5 ? "&hash=" + command[4] : "";
                             getEDFSOutput(command, url);
                         }
                         break;
@@ -87,7 +90,7 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for getPartitionLocations", ""]);
                             setInputArr(curInput);
                         } else {
-                            getEDFSOutput(command, apiPrefix+"getPartitionLocations?path="+command[1]);
+                            getEDFSOutput(command, apiPrefix + "getPartitionLocations?path=" + command[1]);
                         }
                         break;
                     case "readPartition":
@@ -95,7 +98,7 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for readPartition", ""]);
                             setInputArr(curInput);
                         } else {
-                            getEDFSOutput(command, apiPrefix+"readPartition?path="+command[1]+"&partition="+command[2]);
+                            getEDFSOutput(command, apiPrefix + "readPartition?path=" + command[1] + "&partition=" + command[2]);
                         }
                         break;
                     case "getAvgFamilyIncome":
@@ -103,9 +106,9 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for getAvgFamilyIncome", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = "/getAvgFamilyIncome?path="+command[1];
-                            url += command.length >= 3 ? "&debug="+command[2] : "";
-                            url += command.length === 4 ? "&hash="+command[3] : "";
+                            let url = "/getAvgFamilyIncome?path=" + command[1];
+                            url += command.length >= 3 ? "&debug=" + command[2] : "";
+                            url += command.length === 4 ? "&hash=" + command[3] : "";
                             getEDFSOutput(command, url);
                         }
                         break;
@@ -114,9 +117,9 @@ const Terminal = ({apiPrefix}) => {
                             curInput.push(["Invalid number of arguments for getAvgTimeInUS", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = "/getAvgTimeInUS?path="+command[1];
-                            url += command.length >= 3 ? "&debug="+command[2] : "";
-                            url += command.length === 4 ? "&hash="+command[3] : "";
+                            let url = "/getAvgTimeInUS?path=" + command[1];
+                            url += command.length >= 3 ? "&debug=" + command[2] : "";
+                            url += command.length === 4 ? "&hash=" + command[3] : "";
                             getEDFSOutput(command, url);
                         }
                         break;
@@ -132,7 +135,7 @@ const Terminal = ({apiPrefix}) => {
         }
         return;
     }
-    
+
     const [inputArr, setInputArr] = useState([["", ""]]);
     return (
         <div className="edfs-terminal">
@@ -143,16 +146,16 @@ const Terminal = ({apiPrefix}) => {
                             {arr[0] &&
                                 <pre className="terminal-input">{arr[0]}</pre>
                             }
-                            {"edfs-terminal-user:"+ (apiPrefix === "/" ? "MySQL": "Firebase") + " $"}
+                            {"edfs-terminal-user:" + (apiPrefix === "/" ? "MySQL" : "Firebase") + " $"}
                             <input
-                                key={"input"+id}
-                                ref={(input) => {lastInput = input;}}
+                                key={"input" + id}
+                                ref={(input) => { lastInput = input; }}
                                 className="terminal-input"
                                 onKeyUp={onEnterPress}
                                 value={arr[1]}
                                 onChange={e => {
                                     const currVal = [...inputArr];
-                                    currVal[currVal.length-1][1] = e.target.value;
+                                    currVal[currVal.length - 1][1] = e.target.value;
                                     setInputArr(currVal);
                                 }}
                             />
@@ -164,16 +167,16 @@ const Terminal = ({apiPrefix}) => {
                         {arr[0] &&
                             <pre className="terminal-input">{arr[0]}</pre>
                         }
-                        {"edfs-terminal-user:"+ (apiPrefix === "/" ? "MySQL": "Firebase") + " $"}
+                        {"edfs-terminal-user:" + (apiPrefix === "/" ? "MySQL" : "Firebase") + " $"}
                         <input
                             disabled
-                            key={"input"+id}
+                            key={"input" + id}
                             className="terminal-input"
                             onKeyUp={onEnterPress}
                             value={arr[1]}
                             onChange={e => {
                                 const currVal = [...inputArr];
-                                currVal[currVal.length-1][1] = e.target.value;
+                                currVal[currVal.length - 1][1] = e.target.value;
                                 setInputArr(currVal);
                             }}
                         />
