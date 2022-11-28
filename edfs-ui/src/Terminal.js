@@ -17,6 +17,8 @@ const Terminal = () => {
             if (response["data"]["status"] === "EDFS200") {
                 switch (command[0]) {
                     case "getPartitionLocations":
+                    case "getAvgFamilyIncome":
+                    case "getAvgTimeInUS":
                         newResponse = JSON.stringify(newResponse, null, 4);
                         break;
                     default:
@@ -94,6 +96,28 @@ const Terminal = () => {
                             setInputArr(curInput);
                         } else {
                             getEDFSOutput(command, "/readPartition?path="+command[1]+"&partition="+command[2]);
+                        }
+                        break;
+                    case "getAvgFamilyIncome":
+                        if (command.length < 2 || command.length > 4) {
+                            curInput.push(["Invalid number of arguments for getAvgFamilyIncome", ""]);
+                            setInputArr(curInput);
+                        } else {
+                            let url = "/getAvgFamilyIncome?path="+command[1];
+                            url += command.length >= 3 ? "&debug="+command[2] : "";
+                            url += command.length === 4 ? "&hash="+command[3] : "";
+                            getEDFSOutput(command, url);
+                        }
+                        break;
+                    case "getAvgTimeInUS":
+                        if (command.length < 2 || command.length > 4) {
+                            curInput.push(["Invalid number of arguments for getAvgTimeInUS", ""]);
+                            setInputArr(curInput);
+                        } else {
+                            let url = "/getAvgTimeInUS?path="+command[1];
+                            url += command.length >= 3 ? "&debug="+command[2] : "";
+                            url += command.length === 4 ? "&hash="+command[3] : "";
+                            getEDFSOutput(command, url);
                         }
                         break;
                     default:
