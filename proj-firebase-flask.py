@@ -373,7 +373,7 @@ def cat() -> tuple[object, int]:
     df = df.sort_values(by='index')
     df = df.drop('index', axis=1)
     return {
-        "response": df.to_string(),
+        "response": df.to_csv(index=False),
         "status": "EDFS200"
     }, 200
 
@@ -576,7 +576,7 @@ def getPartitionLocations() -> tuple[object, int]:
     }, 200
 
 
-def getPartitionIds(path: str, inode_num: int, hash_attr_val: str = "") -> tuple[Union[str, dict], int]:
+def getPartitionIds(path: str, inode_num: int, hash_attr_val: str = None) -> tuple[Union[str, dict], int]:
 
     url = FIREBASE_URL + NAMENODE + INODE + JSON + \
         '?orderBy="inode"&equalTo=' + str(inode_num)
@@ -588,7 +588,7 @@ def getPartitionIds(path: str, inode_num: int, hash_attr_val: str = "") -> tuple
         "Replica 2": dict()
     }
     blocks = curr_inode.get('blocks', {})
-    if hash_attr_val != "":
+    if hash_attr_val:
         try:
             hash_attr_val = literal_eval(hash_attr_val)
         except ValueError:
@@ -630,7 +630,7 @@ def readPartition() -> tuple[object, int]:
         df = pd.read_csv(csvStringIO, sep=",")
         df = df.sort_values(by='index')
         df = df.drop('index', axis=1)
-        data = df.to_string()
+        data = df.to_csv(index = False)
     return {
         "response": data,
         "status": "EDFS"+str(status)
@@ -661,16 +661,19 @@ def readPartitionContent(path: str, inode_num: int, partition: int) -> tuple[str
     return data, 200
 
 
-@app.route('/getAvgArmCircum', methods=['GET'])
-def getAvgArmCircum() -> tuple[str, int]:
+@app.route('/getAvgGripStrn', methods=['GET'])
+def getAvgGripStrn() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
-    hash = ""
+    hash = None
     if "hash" in args:
         hash = args["hash"]
     debug = False
     if "debug" in args:
-        debug = bool(request.args.get("debug"))
+        try:
+            debug = literal_eval(args.get("debug"))
+        except:
+            pass
 
     answer, order = is_valid_path(list(filter(None, path.split("/"))))
     if not answer:
@@ -683,30 +686,66 @@ def getAvgArmCircum() -> tuple[str, int]:
         with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
             if partitions["Replica 1"]:
                 resultPromises = [pool.apply_async(mapPartition, args=(
-                    path, inode_num, partition, calcAvgArmCircum, debug)) for partition, _ in partitions["Replica 1"].items()]
+                    path, inode_num, partition, calcAvg, 'MGDCGSZ', debug)) for partition, _ in partitions["Replica 1"].items()]
             elif partitions["Replica 2"]:
                 resultPromises = [pool.apply_async(mapPartition, args=(
-                    path, inode_num, partition, calcAvgArmCircum, debug)) for partition, _ in partitions["Replica 2"].items()]
+                    path, inode_num, partition, calcAvg, 'MGDCGSZ', debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
         return reduce(results, combineAverages, debug)
     return partitions, status
 
 
-def mapPartition(path: str, inode_num: int, partition: str, callback: Callable[[str], tuple[dict, int]], debug: bool = False) -> tuple[dict, int]:
+@app.route('/getAvgArmCircum', methods=['GET'])
+def getAvgArmCircum() -> tuple[str, int]:
+    args = request.args.to_dict()
+    path = args["path"]
+    hash = None
+    if "hash" in args:
+        hash = args["hash"]
+    debug = False
+    if "debug" in args:
+        try:
+            debug = literal_eval(args.get("debug"))
+        except:
+            pass
+
+    answer, order = is_valid_path(list(filter(None, path.split("/"))))
+    if not answer:
+        return f"{path}: No such file or directory", 400
+    inode_num = order[-1]
+
+    partitions, status = getPartitionIds(path, inode_num, hash)
+    resultPromises = []
+    if status == 200 and isinstance(partitions, str) == False:
+        with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
+            if partitions["Replica 1"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(
+                    path, inode_num, partition, calcAvg, 'BMXARMC', debug)) for partition, _ in partitions["Replica 1"].items()]
+            elif partitions["Replica 2"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(
+                    path, inode_num, partition, calcAvg, 'BMXARMC', debug)) for partition, _ in partitions["Replica 2"].items()]
+            results = [promise.get() for promise in resultPromises]
+        pool.join()
+        return reduce(results, combineAverages, debug)
+    return partitions, status
+
+
+def mapPartition(path: str, inode_num: int, partition: str, callback: Callable[[str], tuple[dict, int]], column: str, debug: bool = False) -> tuple[dict, int]:
     '''
     This function takes partition identified by partitionId and transforms the data in it according to the callback function
     Arguments:
         path - The path of the file in the EDFS
         inode_num - The inode number of the file in EDFS
         partition - Partition number of the partition
+        column - name of the column whose average you want to find
         callback - The callback function used to transform the data in the partition
     Returns:
         res - The data after transforming the content from the partition
     '''
     res, status = readPartitionContent(path, inode_num, int(partition))
     if status == 200:
-        output, s = callback(res)
+        output, s = callback(res, column)
         if s == 200 and debug:
             output["explanation"] = {
                 "Partition": partition,
@@ -724,16 +763,14 @@ def reduce(results: list, callback: Callable[[list, bool], tuple[str, int]], deb
     return callback(results, debug)
 
 
-def calcAvgArmCircum(data) -> tuple[dict, int]:
+def calcAvg(data: str, col: str) -> tuple[dict, int]:
 
     csvStringIO = StringIO(data)
     df = pd.read_csv(csvStringIO, sep=",")
-    df = df.sort_values(by='index')
-    df = df.drop('index', axis=1)
     return {
         "message": "Successfully calculated average",
         "data": {
-            "average": df['BMXARMC'].mean(),
+            "average": df[col].mean(),
             "size": len(df.index)
         }
     }, 200
@@ -749,7 +786,7 @@ def combineAverages(results: list, debug: bool) -> tuple[str, int]:
     }
     status = 400
     if totalCount > 0:
-        res["result"] = f"The overall average is {(cumulativeAvg/totalCount)}"
+        res["result"] = f"The overall average is {(cumulativeAvg/totalCount):.3f}"
         if debug:
             res["explanation"] = [result['explanation']
                                   for result, _ in results]
