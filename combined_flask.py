@@ -32,6 +32,7 @@ MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE'))
 DEFAULT_DIR_PERMISSION = os.environ.get('DEFAULT_DIR_PERMISSION')
 DEFAULT_FILE_PERMISSION = os.environ.get('DEFAULT_FILE_PERMISSION')
 REPLICATION_FACTOR = 2
+MAX_THREADS = int(os.environ.get('MAX_THREADS'))
 
 FIREBASE_URL = os.environ.get('FIREBASE_URL')
 FIREBASE_DEFAULT_DIR_PERMISSION = os.environ.get('FIREBASE_DEFAULT_DIR_PERMISSION')
@@ -401,7 +402,12 @@ def put() -> tuple[object, int]:
     rowsPerPartition = ceil((df.shape[0]*partition_size)/file_size)
     offset = 0
     try:
+        if np.issubdtype(df[hash_attr].dtypes, np.number):
+            df[hash_attr].fillna(0, inplace=True)
+        else:
+            df[hash_attr].fillna("NULL", inplace=True)
         groups = df.groupby(by=hash_attr)
+        
     except KeyError:
         df["hash"] = pd.cut(x=df[df.columns[0]], bins=partitions)
         df["hash"] = df["hash"].astype(str)
@@ -655,6 +661,9 @@ def combineAverages(results: list, debug: bool) -> tuple[str, int]:
         status = 200
     return res, status
 
+
+
+
 # Firebase APIS
 def firebase_is_valid_path(nodes: list) -> tuple[bool, list]:
     '''
@@ -880,35 +889,28 @@ def firebase_rm() -> tuple[object, int]:
             current_parent_directory['empty'] = True
         r = requests.put(url, data=json.dumps(current_parent_directory))
 
-        # delete from inodes and datanodes
-        deletions_in_datanodes = {
-            i: 0 for i in range(1, NUMBER_OF_DATANODES+1)}
-        key_inode = str(last_inode) + "_" + \
-            list(filter(None, path.split("/")))[-1].replace(".", "_")
+        # delete from datanodes and datanode_metadata
+        deletions_in_datanodes = {str(i): {} for i in range(1, NUMBER_OF_DATANODES+1)}
+        key_inode = str(last_inode) + "_" + list(filter(None, path.split("/")))[-1].replace(".", "_")
         url = FIREBASE_URL + NAMENODE + INODE + key_inode + JSON
         r = requests.get(url)
         inode = r.json()
         blocks = inode.get('blocks', {})
         for block_id, block in blocks.items():
-            datanode_id = block['datanode_id']
-            deletions_in_datanodes[datanode_id] += 1
-            datanode_url = FIREBASE_URL + DATANODE + \
-                str(datanode_id) + '/' + str(block_id) + JSON
-            r = requests.delete(datanode_url)
-
-        datanode_metadata_url = FIREBASE_URL + DATANODE + METADATA + JSON
-        r = requests.get(datanode_metadata_url)
-        datanode_metadata = r.json()
-        for key, value in deletions_in_datanodes.items():
-            data_dict = datanode_metadata[str(key)]
-            data_dict['count'] -= value
-            if data_dict['count'] == 0:
-                datanode_url = FIREBASE_URL + DATANODE + str(key) + JSON
-                r = requests.patch(
-                    datanode_url, data=json.dumps({"empty": True}))
-        r = requests.put(datanode_metadata_url,
-                         data=json.dumps(datanode_metadata))
-
+            datanode_id = str(block['datanode_id'])
+            deletions_in_datanodes[datanode_id][block_id] = None
+            
+        for datanode_id, datanode in deletions_in_datanodes.items():
+            datanode_url = FIREBASE_URL + DATANODE + datanode_id + JSON
+            datanode_metadata_url = FIREBASE_URL + DATANODE + METADATA + datanode_id  + JSON
+            r = requests.get(datanode_metadata_url)
+            count = r.json()['count'] - len(datanode)
+            if count == 0:
+                datanode["empty"] = False
+            datanode_metadata_count = {"count" : count}
+            r = requests.patch(datanode_url, data=json.dumps(datanode))
+            r = requests.patch(datanode_metadata_url, data=json.dumps(datanode_metadata_count))
+        
         # delete from inodes
         r = requests.delete(url)
 
@@ -926,8 +928,7 @@ def firebase_rm() -> tuple[object, int]:
             r = requests.put(url, data=json.dumps(current_parent_directory))
 
             # delete from inodes
-            key_inode = str(last_inode) + "_" + list(filter(None,
-                                                            path.split("/")))[-1].replace(".", "_")
+            key_inode = str(last_inode) + "_" + list(filter(None,path.split("/")))[-1].replace(".", "_")
             url = FIREBASE_URL + NAMENODE + INODE + key_inode + JSON
             r = requests.delete(url)
 
@@ -967,15 +968,13 @@ def firebase_cat() -> tuple[object, int]:
             "response": "",
             "status": "EDFS204"
         }, 200
-    df = pd.DataFrame()
-    for block_id, block in blocks.items():
-        datanode_id = block['datanode_id']
-        url = FIREBASE_URL + DATANODE + \
-            str(datanode_id) + '/' + str(block_id) + JSON
-        r = requests.get(url)
-        csvStringIO = StringIO(r.json())
-        part_df = pd.read_csv(csvStringIO, sep=",")
-        df = pd.concat([df, part_df])
+    
+    d_urls = [FIREBASE_URL + DATANODE + str(block['datanode_id']) + '/' + str(block_id) + JSON for block_id, block in blocks.items()]
+    with Pool(processes=min(len(d_urls), MAX_THREADS)) as pool:
+        resultPromises = [pool.apply_async(getURLContents, args=(d_url,)) for d_url in d_urls]
+        results = [promise.get() for promise in resultPromises]
+    pool.join()
+    df = pd.concat(results)
 
     df = df.drop_duplicates()
     df = df.sort_values(by='index')
@@ -984,6 +983,12 @@ def firebase_cat() -> tuple[object, int]:
         "response": df.to_csv(index=False),
         "status": "EDFS200"
     }, 200
+
+def getURLContents(d_url: str):
+    r = requests.get(d_url)
+    csvStringIO = StringIO(r.json())
+    part_df = pd.read_csv(csvStringIO, sep=",")
+    return part_df
 
 @app.route('/firebase_put', methods=['GET'])
 def firebase_put() -> tuple[object, int]:
