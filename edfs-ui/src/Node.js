@@ -4,10 +4,10 @@ import { ReactComponent as Folder } from "./folder.svg";
 import { ReactComponent as Back } from "./back.svg";
 import axios from "axios";
 
-function getFiles(path, setContent) {
+function getFiles(path, apiPrefix, setContent) {
     axios({
         method: "GET",
-        url: "/ls?path=" + (path === "" ? "/" : path)
+        url: apiPrefix+"ls?path=" + (path === "" ? "/" : path)
     })
     .then((response) => {
         const res = response.data.response.split("\n").filter(e => e);
@@ -28,12 +28,16 @@ function getFiles(path, setContent) {
     });
 }
 
-const Node = () => {
+const Node = ({apiPrefix}) => {
     const [content, setContent] = useState(null);
     const [filePath, setFilePath] = useState("");
     useEffect(() => {
-        getFiles(filePath, setContent);
-    }, [filePath]);
+        setFilePath("");
+    }, [apiPrefix])
+    useEffect(() => {
+        setContent(null);
+        getFiles(filePath, apiPrefix, setContent);
+    }, [filePath, apiPrefix]);
     return (
         <div className="FileBrowser">
             {filePath && 
