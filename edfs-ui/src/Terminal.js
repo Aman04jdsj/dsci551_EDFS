@@ -20,8 +20,9 @@ const Terminal = ({ apiPrefix }) => {
                 if (response["data"]["status"] === "EDFS200") {
                     switch (command[0]) {
                         case "getPartitionLocations":
-                        case "getAvgFamilyIncome":
-                        case "getAvgTimeInUS":
+                        case "getAvg":
+                        case "getMax":
+                        case "getMin":
                             newResponse = JSON.stringify(newResponse, null, 4);
                             break;
                         default:
@@ -101,25 +102,36 @@ const Terminal = ({ apiPrefix }) => {
                             getEDFSOutput(command, apiPrefix + "readPartition?path=" + command[1] + "&partition=" + command[2]);
                         }
                         break;
-                    case "getAvgFamilyIncome":
-                        if (command.length < 2 || command.length > 4) {
-                            curInput.push(["Invalid number of arguments for getAvgFamilyIncome", ""]);
+                    case "getAvg":
+                        if (command.length < 3 || command.length > 5) {
+                            curInput.push(["Invalid number of arguments for getAvg", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = "/getAvgFamilyIncome?path=" + command[1];
-                            url += command.length >= 3 ? "&debug=" + command[2] : "";
-                            url += command.length === 4 ? "&hash=" + command[3] : "";
+                            let url = "/getAvg?path=" + command[1] + "&col=" + command[2];
+                            url += command.length >= 4 ? "&debug=" + command[3] : "";
+                            url += command.length === 5 ? "&hash=" + command[4] : "";
                             getEDFSOutput(command, url);
                         }
                         break;
-                    case "getAvgTimeInUS":
-                        if (command.length < 2 || command.length > 4) {
-                            curInput.push(["Invalid number of arguments for getAvgTimeInUS", ""]);
+                    case "getMax":
+                        if (command.length < 3 || command.length > 5) {
+                            curInput.push(["Invalid number of arguments for getMax", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = "/getAvgTimeInUS?path=" + command[1];
-                            url += command.length >= 3 ? "&debug=" + command[2] : "";
-                            url += command.length === 4 ? "&hash=" + command[3] : "";
+                            let url = "/getMax?path=" + command[1] + "&col=" + command[2];
+                            url += command.length >= 4 ? "&debug=" + command[3] : "";
+                            url += command.length === 5 ? "&hash=" + command[4] : "";
+                            getEDFSOutput(command, url);
+                        }
+                        break;
+                    case "getMin":
+                        if (command.length < 3 || command.length > 5) {
+                            curInput.push(["Invalid number of arguments for getMin", ""]);
+                            setInputArr(curInput);
+                        } else {
+                            let url = "/getMin?path=" + command[1] + "&col=" + command[2];
+                            url += command.length >= 4 ? "&debug=" + command[3] : "";
+                            url += command.length === 5 ? "&hash=" + command[4] : "";
                             getEDFSOutput(command, url);
                         }
                         break;
