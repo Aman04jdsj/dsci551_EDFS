@@ -458,7 +458,7 @@ def getPartitionIds(path: str, hash: str = None) -> tuple[Union[str, dict], int]
         f" WHERE nn.name = '{path}'"
     if hash:
         try:
-            hash = int(hash)
+            hash = literal_eval(hash)
         except ValueError:
             pass
         query += f" AND bi.hash_attribute = '{hash}'"
