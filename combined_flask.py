@@ -1393,10 +1393,11 @@ def firebase_readPartitionContent(path: str, inode_num: int, partition: int) -> 
 
     return data, 200
 
-@app.route('/firebase_getAvgGripStrn', methods=['GET'])
-def firebase_getAvgGripStrn() -> tuple[str, int]:
+@app.route('/firebase_getAvg', methods=['GET'])
+def firebase_getAvg() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
+    col = args["col"]
     hash = None
     if "hash" in args:
         hash = args["hash"]
@@ -1411,26 +1412,48 @@ def firebase_getAvgGripStrn() -> tuple[str, int]:
     if not answer:
         return f"{path}: No such file or directory", 400
     inode_num = order[-1]
-
+    
+    data, status = firebase_readPartitionContent(path, inode_num, 1)
+    if status == 200:
+        csvStringIO = StringIO(data)
+        df = pd.read_csv(csvStringIO, sep=",")
+    else:
+        return {
+            "response": data,
+            "status": "EDFS"+str(status)
+        }, 200
+    try:
+        if not np.issubdtype(df[col].dtypes, np.number):
+            return {
+                "response": f"Cannot calculate average on column {col}: Data not numeric",
+                "status": "EDFS400"
+            }, 200
+    except KeyError:
+        return {
+            "response": f"Column {col} doesn't exist",
+            "status": "EDFS400"
+        }, 200
+        
     partitions, status = firebase_getPartitionIds(path, inode_num, hash)
     resultPromises = []
     if status == 200 and isinstance(partitions, str) == False:
         with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
             if partitions["Replica 1"]:
                 resultPromises = [pool.apply_async(firebase_mapPartition, args=(
-                    path, inode_num, partition, firebase_calcAvg, 'MGDCGSZ', debug)) for partition, _ in partitions["Replica 1"].items()]
+                    path, inode_num, partition, firebase_calcAvg, col, debug)) for partition, _ in partitions["Replica 1"].items()]
             elif partitions["Replica 2"]:
                 resultPromises = [pool.apply_async(firebase_mapPartition, args=(
-                    path, inode_num, partition, firebase_calcAvg, 'MGDCGSZ', debug)) for partition, _ in partitions["Replica 2"].items()]
+                    path, inode_num, partition, firebase_calcAvg, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
         return firebase_reduce(results, firebase_combineAverages, debug)
     return partitions, status
 
-@app.route('/firebase_getAvgArmCircum', methods=['GET'])
-def firebase_getAvgArmCircum() -> tuple[str, int]:
+@app.route('/firebase_getMax', methods=['GET'])
+def firebase_getMax() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
+    col = args["col"]
     hash = None
     if "hash" in args:
         hash = args["hash"]
@@ -1445,22 +1468,99 @@ def firebase_getAvgArmCircum() -> tuple[str, int]:
     if not answer:
         return f"{path}: No such file or directory", 400
     inode_num = order[-1]
-
+    
+    data, status = firebase_readPartitionContent(path, inode_num, 1)
+    if status == 200:
+        csvStringIO = StringIO(data)
+        df = pd.read_csv(csvStringIO, sep=",")
+    else:
+        return {
+            "response": data,
+            "status": "EDFS"+str(status)
+        }, 200
+    try:
+        if not np.issubdtype(df[col].dtypes, np.number):
+            return {
+                "response": f"Cannot calculate max on column {col}: Data not numeric",
+                "status": "EDFS400"
+            }, 200
+    except KeyError:
+        return {
+            "response": f"Column {col} doesn't exist",
+            "status": "EDFS400"
+        }, 200
+        
     partitions, status = firebase_getPartitionIds(path, inode_num, hash)
     resultPromises = []
     if status == 200 and isinstance(partitions, str) == False:
         with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
             if partitions["Replica 1"]:
                 resultPromises = [pool.apply_async(firebase_mapPartition, args=(
-                    path, inode_num, partition, firebase_calcAvg, 'BMXARMC', debug)) for partition, _ in partitions["Replica 1"].items()]
+                    path, inode_num, partition, firebase_calcMax, col, debug)) for partition, _ in partitions["Replica 1"].items()]
             elif partitions["Replica 2"]:
                 resultPromises = [pool.apply_async(firebase_mapPartition, args=(
-                    path, inode_num, partition, firebase_calcAvg, 'BMXARMC', debug)) for partition, _ in partitions["Replica 2"].items()]
+                    path, inode_num, partition, firebase_calcMax, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
-        return firebase_reduce(results, firebase_combineAverages, debug)
+        return firebase_reduce(results, firebase_cummulativeMax, debug)
     return partitions, status
+    
+@app.route('/firebase_getMin', methods=['GET'])
+def firebase_getMin() -> tuple[str, int]:
+    args = request.args.to_dict()
+    path = args["path"]
+    col = args["col"]
+    hash = None
+    if "hash" in args:
+        hash = args["hash"]
+    debug = False
+    if "debug" in args:
+        try:
+            debug = literal_eval(args.get("debug"))
+        except:
+            pass
 
+    answer, order = firebase_is_valid_path(list(filter(None, path.split("/"))))
+    if not answer:
+        return f"{path}: No such file or directory", 400
+    inode_num = order[-1]
+    
+    data, status = firebase_readPartitionContent(path, inode_num, 1)
+    if status == 200:
+        csvStringIO = StringIO(data)
+        df = pd.read_csv(csvStringIO, sep=",")
+    else:
+        return {
+            "response": data,
+            "status": "EDFS"+str(status)
+        }, 200
+    try:
+        if not np.issubdtype(df[col].dtypes, np.number):
+            return {
+                "response": f"Cannot calculate min on column {col}: Data not numeric",
+                "status": "EDFS400"
+            }, 200
+    except KeyError:
+        return {
+            "response": f"Column {col} doesn't exist",
+            "status": "EDFS400"
+        }, 200
+        
+    partitions, status = firebase_getPartitionIds(path, inode_num, hash)
+    resultPromises = []
+    if status == 200 and isinstance(partitions, str) == False:
+        with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
+            if partitions["Replica 1"]:
+                resultPromises = [pool.apply_async(firebase_mapPartition, args=(
+                    path, inode_num, partition, firebase_calcMin, col, debug)) for partition, _ in partitions["Replica 1"].items()]
+            elif partitions["Replica 2"]:
+                resultPromises = [pool.apply_async(firebase_mapPartition, args=(
+                    path, inode_num, partition, firebase_calcMin, col, debug)) for partition, _ in partitions["Replica 2"].items()]
+            results = [promise.get() for promise in resultPromises]
+        pool.join()
+        return firebase_reduce(results, firebase_cummulativeMin, debug)
+    return partitions, status
+    
 def firebase_mapPartition(path: str, inode_num: int, partition: str, callback: Callable[[str], tuple[dict, int]], column: str, debug: bool = False) -> tuple[dict, int]:
     '''
     This function takes partition identified by partitionId and transforms the data in it according to the callback function
@@ -1520,5 +1620,54 @@ def firebase_combineAverages(results: list, debug: bool) -> tuple[str, int]:
         status = 200
     return res, status
 
+def firebase_calcMax(data: str, col: str) -> tuple[dict, int]:
 
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
+    return {
+        "message": "Successfully calculated max",
+        "data": {
+            "max": df[col].max(),
+            "size": len(df.index)
+        }
+    }, 200
 
+def firebase_cummulativeMax(results: list, debug: bool) -> tuple[str, int]:
+    cumulativeMax = max([0 if status != 200 else result["data"]["max"] for result, status in results])
+    totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
+    res = {
+        "result": "No data found"
+    }
+    status = 400
+    if totalCount > 0:
+        res["result"] = f"The overall maximum is {(cumulativeMax):.3f}"
+        if debug:
+            res["explanation"] = [result['explanation'] for result, _ in results]
+        status = 200
+    return res, status
+
+def firebase_calcMin(data: str, col: str) -> tuple[dict, int]:
+
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
+    return {
+        "message": "Successfully calculated min",
+        "data": {
+            "min": df[col].min(),
+            "size": len(df.index)
+        }
+    }, 200
+
+def firebase_cummulativeMin(results: list, debug: bool) -> tuple[str, int]:
+    cumulativeMin = min([0 if status != 200 else result["data"]["min"] for result, status in results])
+    totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
+    res = {
+        "result": "No data found"
+    }
+    status = 400
+    if totalCount > 0:
+        res["result"] = f"The overall minimum is {(cumulativeMin):.3f}"
+        if debug:
+            res["explanation"] = [result['explanation'] for result, _ in results]
+        status = 200
+    return res, status
