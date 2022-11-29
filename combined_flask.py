@@ -738,6 +738,7 @@ def calcAvg(data: str, col: str) -> tuple[dict, int]:
 def calcMax(data: str, col: str) -> tuple[dict, int]:
     csvStringIO = StringIO(data)
     df = pd.read_csv(csvStringIO, sep=",")
+    df = df.fillna(0)
     return {
         "message": "Successfully calculated maximum",
         "data": {
@@ -749,6 +750,7 @@ def calcMax(data: str, col: str) -> tuple[dict, int]:
 def calcMin(data: str, col: str) -> tuple[dict, int]:
     csvStringIO = StringIO(data)
     df = pd.read_csv(csvStringIO, sep=",")
+    df = df.fillna(inf)
     return {
         "message": "Successfully calculated minimum",
         "data": {
@@ -758,8 +760,8 @@ def calcMin(data: str, col: str) -> tuple[dict, int]:
     }, 200
 
 def combineAverages(results: list, debug: bool) -> tuple[str, int]:
-    cumulativeAvg = sum([0 if status != 200 else result["data"]["average"]*result["data"]["size"] for result, status in results])
-    totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
+    cumulativeAvg = sum([0 if status != 200 else (result["data"]["average"]*result["data"]["size"] if result["data"]["average"] else 0) for result, status in results])
+    totalCount = sum([0 if status != 200 else (result["data"]["size"] if result["data"]["average"] else 0) for result, status in results])
     res = {
         "result": "No data found"
     }
@@ -1604,9 +1606,8 @@ def firebase_calcAvg(data: str, col: str) -> tuple[dict, int]:
     }, 200
 
 def firebase_combineAverages(results: list, debug: bool) -> tuple[str, int]:
-    cumulativeAvg = sum([0 if status != 200 else result["data"]["average"]
-                        * result["data"]["size"] for result, status in results])
-    totalCount = sum([0 if status != 200 else result["data"]["size"]
+    cumulativeAvg = sum([0 if status != 200 else (result["data"]["average"]*result["data"]["size"] if result["data"]["average"] else 0) for result, status in results])
+    totalCount = sum([0 if status != 200 else (result["data"]["size"] if result["data"]["average"] else 0)
                      for result, status in results])
     res = {
         "result": "No data found"
@@ -1624,6 +1625,7 @@ def firebase_calcMax(data: str, col: str) -> tuple[dict, int]:
 
     csvStringIO = StringIO(data)
     df = pd.read_csv(csvStringIO, sep=",")
+    df = df.fillna(0)
     return {
         "message": "Successfully calculated max",
         "data": {
@@ -1650,6 +1652,7 @@ def firebase_calcMin(data: str, col: str) -> tuple[dict, int]:
 
     csvStringIO = StringIO(data)
     df = pd.read_csv(csvStringIO, sep=",")
+    df = df.fillna(inf)
     return {
         "message": "Successfully calculated min",
         "data": {

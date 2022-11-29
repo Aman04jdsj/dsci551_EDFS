@@ -107,7 +107,7 @@ const Terminal = ({ apiPrefix }) => {
                             curInput.push(["Invalid number of arguments for getAvg", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = "/getAvg?path=" + command[1] + "&col=" + command[2];
+                            let url = apiPrefix + "getAvg?path=" + command[1] + "&col=" + command[2];
                             url += command.length >= 4 ? "&debug=" + command[3] : "";
                             url += command.length === 5 ? "&hash=" + command[4] : "";
                             getEDFSOutput(command, url);
@@ -118,7 +118,7 @@ const Terminal = ({ apiPrefix }) => {
                             curInput.push(["Invalid number of arguments for getMax", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = "/getMax?path=" + command[1] + "&col=" + command[2];
+                            let url = apiPrefix + "getMax?path=" + command[1] + "&col=" + command[2];
                             url += command.length >= 4 ? "&debug=" + command[3] : "";
                             url += command.length === 5 ? "&hash=" + command[4] : "";
                             getEDFSOutput(command, url);
@@ -129,7 +129,7 @@ const Terminal = ({ apiPrefix }) => {
                             curInput.push(["Invalid number of arguments for getMin", ""]);
                             setInputArr(curInput);
                         } else {
-                            let url = "/getMin?path=" + command[1] + "&col=" + command[2];
+                            let url = apiPrefix + "getMin?path=" + command[1] + "&col=" + command[2];
                             url += command.length >= 4 ? "&debug=" + command[3] : "";
                             url += command.length === 5 ? "&hash=" + command[4] : "";
                             getEDFSOutput(command, url);
