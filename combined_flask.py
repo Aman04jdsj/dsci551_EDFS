@@ -12,7 +12,7 @@ from io import StringIO
 from dotenv import load_dotenv
 from flask import Flask, request
 from flask_cors import CORS
-from math import ceil
+from math import ceil, inf
 from multiprocessing import Pool
 from pathlib import Path
 from random import choices, sample
@@ -457,6 +457,10 @@ def getPartitionIds(path: str, hash: str = None) -> tuple[Union[str, dict], int]
         " INNER JOIN Namenode nn ON nn.inode_num = bi.file_inode" + \
         f" WHERE nn.name = '{path}'"
     if hash:
+        try:
+            hash = float(hash)
+        except ValueError:
+            pass
         query += f" AND bi.hash_attribute = '{hash}'"
     query += " ORDER BY bi.offset"
     conn = pymysql.connect(
@@ -542,10 +546,11 @@ def readPartitionContent(path: str, partition: int) -> tuple[str, int]:
         return f"No content found for partition {partition} of file {path}", 400
     return res[0][0], 200
 
-@app.route('/getAvgFamilyIncome', methods = ['GET'])
-def getAvgFamilyIncome() -> tuple[str, int]:
+@app.route('/getAvg', methods = ['GET'])
+def getAvg() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
+    col = args["col"]
     hash = None
     if "hash" in args:
         hash = args["hash"]
@@ -555,14 +560,30 @@ def getAvgFamilyIncome() -> tuple[str, int]:
             debug = literal_eval(args["debug"])
         except ValueError:
             pass
+    data, status = readPartitionContent(path, 1)
+    if status != 200:
+        return data, status
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
+    try:
+        if not np.issubdtype(df[col].dtypes, np.number):
+            return {
+                "response": f"Cannot calculate average on column {col}: Data not numeric",
+                "status": "EDFS400"
+            }, 200
+    except KeyError:
+        return {
+            "response": f"Column {col} doesn't exist",
+            "status": "EDFS400"
+        }, 200
     partitions, status = getPartitionIds(path, hash)
     resultPromises = []
     if status == 200:
         with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
             if partitions["Replica 1"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "INDFMIN2", debug)) for partition, _ in partitions["Replica 1"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, col, debug)) for partition, _ in partitions["Replica 1"].items()]
             elif partitions["Replica 2"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "INDFMIN2", debug)) for partition, _ in partitions["Replica 2"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
         response, red_status = reduce(results, combineAverages, debug)
@@ -575,10 +596,11 @@ def getAvgFamilyIncome() -> tuple[str, int]:
         "status": "EDFS"+str(status)
     }, 200
 
-@app.route('/getAvgTimeInUS', methods = ['GET'])
-def getAvgTimeInUS() -> tuple[str, int]:
+@app.route('/getMax', methods=['GET'])
+def getMax() -> tuple[str, int]:
     args = request.args.to_dict()
     path = args["path"]
+    col = args["col"]
     hash = None
     if "hash" in args:
         hash = args["hash"]
@@ -588,17 +610,83 @@ def getAvgTimeInUS() -> tuple[str, int]:
             debug = literal_eval(args["debug"])
         except ValueError:
             pass
+    data, status = readPartitionContent(path, 1)
+    if status != 200:
+        return data, status
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
+    try:
+        if not np.issubdtype(df[col].dtypes, np.number):
+            return {
+                "response": f"Cannot calculate max on column {col}: Data not numeric",
+                "status": "EDFS400"
+            }, 200
+    except KeyError:
+        return {
+            "response": f"Column {col} doesn't exist",
+            "status": "EDFS400"
+        }, 200
     partitions, status = getPartitionIds(path, hash)
     resultPromises = []
     if status == 200:
         with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
             if partitions["Replica 1"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "DMDYRSUS", debug)) for partition, _ in partitions["Replica 1"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcMax, col, debug)) for partition, _ in partitions["Replica 1"].items()]
             elif partitions["Replica 2"]:
-                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcAvg, "DMDYRSUS", debug)) for partition, _ in partitions["Replica 2"].items()]
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcMax, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
-        response, red_status = reduce(results, combineAverages, debug)
+        response, red_status = reduce(results, cumulativeMax, debug)
+        return {
+            "response": response,
+            "status": "EDFS"+str(red_status)
+        }, 200
+    return {
+        "response": partitions,
+        "status": "EDFS"+str(status)
+    }, 200
+
+@app.route('/getMin', methods=['GET'])
+def getMin() -> tuple[str, int]:
+    args = request.args.to_dict()
+    path = args["path"]
+    col = args["col"]
+    hash = None
+    if "hash" in args:
+        hash = args["hash"]
+    debug = False
+    if "debug" in args:
+        try:
+            debug = literal_eval(args["debug"])
+        except ValueError:
+            pass
+    data, status = readPartitionContent(path, 1)
+    if status != 200:
+        return data, status
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
+    try:
+        if not np.issubdtype(df[col].dtypes, np.number):
+            return {
+                "response": f"Cannot calculate min on column {col}: Data not numeric",
+                "status": "EDFS400"
+            }, 200
+    except KeyError:
+        return {
+            "response": f"Column {col} doesn't exist",
+            "status": "EDFS400"
+        }, 200
+    partitions, status = getPartitionIds(path, hash)
+    resultPromises = []
+    if status == 200:
+        with Pool(processes=max(len(partitions["Replica 1"]), len(partitions["Replica 2"]))) as pool:
+            if partitions["Replica 1"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcMin, col, debug)) for partition, _ in partitions["Replica 1"].items()]
+            elif partitions["Replica 2"]:
+                resultPromises = [pool.apply_async(mapPartition, args=(path, partition, calcMin, col, debug)) for partition, _ in partitions["Replica 2"].items()]
+            results = [promise.get() for promise in resultPromises]
+        pool.join()
+        response, red_status = reduce(results, cumulativeMin, debug)
         return {
             "response": response,
             "status": "EDFS"+str(red_status)
@@ -647,6 +735,28 @@ def calcAvg(data: str, col: str) -> tuple[dict, int]:
         }
     }, 200
 
+def calcMax(data: str, col: str) -> tuple[dict, int]:
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
+    return {
+        "message": "Successfully calculated maximum",
+        "data": {
+            "max": df[col].max(),
+            "size": len(df.index)
+        }
+    }, 200
+
+def calcMin(data: str, col: str) -> tuple[dict, int]:
+    csvStringIO = StringIO(data)
+    df = pd.read_csv(csvStringIO, sep=",")
+    return {
+        "message": "Successfully calculated minimum",
+        "data": {
+            "min": df[col].min(),
+            "size": len(df.index)
+        }
+    }, 200
+
 def combineAverages(results: list, debug: bool) -> tuple[str, int]:
     cumulativeAvg = sum([0 if status != 200 else result["data"]["average"]*result["data"]["size"] for result, status in results])
     totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
@@ -661,6 +771,33 @@ def combineAverages(results: list, debug: bool) -> tuple[str, int]:
         status = 200
     return res, status
 
+def cumulativeMax(results: list, debug: bool) -> tuple[str, int]:
+    cumulativeMax = max([0 if status != 200 else result["data"]["max"] for result, status in results])
+    totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
+    res = {
+        "result": "No data found"
+    }
+    status = 400
+    if totalCount > 0:
+        res["result"] = f"The overall maximum is {(cumulativeMax):.3f}"
+        if debug:
+            res["explanation"] = [result['explanation'] for result, _ in results]
+        status = 200
+    return res, status
+
+def cumulativeMin(results: list, debug: bool) -> tuple[str, int]:
+    cumulativeMax = min([inf if status != 200 else result["data"]["min"] for result, status in results])
+    totalCount = sum([0 if status != 200 else result["data"]["size"] for result, status in results])
+    res = {
+        "result": "No data found"
+    }
+    status = 400
+    if totalCount > 0:
+        res["result"] = f"The overall minimum is {(cumulativeMax):.3f}"
+        if debug:
+            res["explanation"] = [result['explanation'] for result, _ in results]
+        status = 200
+    return res, status
 
 
 
