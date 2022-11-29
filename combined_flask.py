@@ -1448,7 +1448,7 @@ def firebase_getAvg() -> tuple[str, int]:
                     path, inode_num, partition, firebase_calcAvg, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
-        response, red_status =firebase_reduce(results, firebase_combineAverages, debug)
+        response, red_status = firebase_reduce(results, firebase_combineAverages, debug)
         return {
             "response": response,
             "status": "EDFS"+str(red_status)
