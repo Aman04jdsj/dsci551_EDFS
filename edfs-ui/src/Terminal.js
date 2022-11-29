@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-const Terminal = ({ apiPrefix }) => {
+const Terminal = ({ apiPrefix, setReloadUI }) => {
     let lastInput = null;
     useEffect(() => {
         lastInput.focus();
@@ -28,6 +28,7 @@ const Terminal = ({ apiPrefix }) => {
                         default:
                             break;
                     }
+                    setReloadUI(true);
                 }
                 let curInput = [...inputArr];
                 curInput.push([newResponse, ""]);
