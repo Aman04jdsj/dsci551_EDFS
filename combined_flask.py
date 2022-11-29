@@ -1448,7 +1448,11 @@ def firebase_getAvg() -> tuple[str, int]:
                     path, inode_num, partition, firebase_calcAvg, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
-        return firebase_reduce(results, firebase_combineAverages, debug)
+        response, red_status =firebase_reduce(results, firebase_combineAverages, debug)
+        return {
+            "response": response,
+            "status": "EDFS"+str(red_status)
+        }, 200
     return partitions, status
 
 @app.route('/firebase_getMax', methods=['GET'])
@@ -1504,7 +1508,11 @@ def firebase_getMax() -> tuple[str, int]:
                     path, inode_num, partition, firebase_calcMax, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
-        return firebase_reduce(results, firebase_cummulativeMax, debug)
+        response, red_status = firebase_reduce(results, firebase_cummulativeMax, debug)
+        return {
+            "response": response,
+            "status": "EDFS"+str(red_status)
+        }, 200
     return partitions, status
     
 @app.route('/firebase_getMin', methods=['GET'])
@@ -1560,7 +1568,11 @@ def firebase_getMin() -> tuple[str, int]:
                     path, inode_num, partition, firebase_calcMin, col, debug)) for partition, _ in partitions["Replica 2"].items()]
             results = [promise.get() for promise in resultPromises]
         pool.join()
-        return firebase_reduce(results, firebase_cummulativeMin, debug)
+        response, red_status = firebase_reduce(results, firebase_cummulativeMin, debug)
+        return {
+            "response": response,
+            "status": "EDFS"+str(red_status)
+        }, 200
     return partitions, status
     
 def firebase_mapPartition(path: str, inode_num: int, partition: str, callback: Callable[[str], tuple[dict, int]], column: str, debug: bool = False) -> tuple[dict, int]:
@@ -1606,8 +1618,8 @@ def firebase_calcAvg(data: str, col: str) -> tuple[dict, int]:
     }, 200
 
 def firebase_combineAverages(results: list, debug: bool) -> tuple[str, int]:
-    cumulativeAvg = sum([0 if status != 200 else (result["data"]["average"]*result["data"]["size"] if result["data"]["average"] else 0) for result, status in results])
-    totalCount = sum([0 if status != 200 else (result["data"]["size"] if result["data"]["average"] else 0)
+    cumulativeAvg = sum([0 if status != 200 else (result["data"]["average"]*result["data"]["size"] if str(result["data"]["average"]).lower() == "nan" else 0) for result, status in results])
+    totalCount = sum([0 if status != 200 else (result["data"]["size"] if str(result["data"]["average"]).lower() == "nan" else 0)
                      for result, status in results])
     res = {
         "result": "No data found"
