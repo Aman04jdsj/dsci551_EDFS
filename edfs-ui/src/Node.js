@@ -28,7 +28,7 @@ function getFiles(path, apiPrefix, setContent) {
     });
 }
 
-const Node = ({apiPrefix}) => {
+const Node = ({apiPrefix, reloadUI, setReloadUI}) => {
     const [content, setContent] = useState(null);
     const [filePath, setFilePath] = useState("");
     useEffect(() => {
@@ -38,6 +38,13 @@ const Node = ({apiPrefix}) => {
         setContent(null);
         getFiles(filePath, apiPrefix, setContent);
     }, [filePath, apiPrefix]);
+    useEffect(() => {
+        if (reloadUI) {
+            setContent(null);
+            getFiles(filePath, apiPrefix, setContent);
+            setReloadUI(false);
+        }
+    }, [reloadUI]);
     return (
         <div className="FileBrowser">
             {filePath && 

@@ -5,6 +5,7 @@ import './App.css';
 
 function App() {
   const [apiPrefix, setApiPrefix] = useState("/");
+  const [reloadUI, setReloadUI] = useState(false);
   return (
     <div className="App">
       <fieldset className="edfs-radio">
@@ -18,11 +19,11 @@ function App() {
       </fieldset>
       <div>
         <label htmlFor="browser">EDFS File Explorer</label>
-        <Node id="browser" apiPrefix={apiPrefix} />
+        <Node id="browser" apiPrefix={apiPrefix} reloadUI={reloadUI} setReloadUI={setReloadUI} />
       </div>
       <div>
         <label htmlFor="terminal">EDFS Command Prompt</label>
-        <Terminal apiPrefix={apiPrefix} />
+        <Terminal apiPrefix={apiPrefix} setReloadUI={setReloadUI} />
       </div>
     </div>
   );
